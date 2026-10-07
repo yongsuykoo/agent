@@ -156,7 +156,9 @@ class SelfTestTests(unittest.TestCase):
             fixture.path.write_text("", encoding="utf-8")
             fixture.desktop = Desktop(fixture.path.stem + " - Notepad")
             fixture.identity = (41, 81)
-            fixture.desktop.window.type_keys.side_effect = lambda *a, **k: fixture.path.write_text(fixture.desktop.value, encoding="utf-8")
+            # The fake models Notepad's on-disk text, not Python's automatic
+            # newline translation (which doubles CRLF on Windows).
+            fixture.desktop.window.type_keys.side_effect = lambda *a, **k: fixture.path.write_text(fixture.desktop.value, encoding="utf-8", newline="")
             return {"test_file": str(fixture.path)}
         package = types.ModuleType("pywinauto")
         package.win32functions = types.SimpleNamespace(GetForegroundWindow=lambda: 41)
@@ -172,10 +174,18 @@ class SelfTestTests(unittest.TestCase):
             windows.windows.return_value = [(41, "Calculator")]
             windows.return_value = calculator
             report = self_test(directory, cloud=Cloud(), emit=lambda text: None)
-            self.assertEqual(report["status"], "passed")
+            self.assertEqual(report["status"], "passed", json.dumps(report["checks"], indent=2))
             self.assertEqual(report["counts"]["passed"], 12)
             self.assertEqual(json.loads(Path(report["report_path"]).read_text(encoding="utf-8")), report)
             sessions = Path(report["report_path"]).parent / "sessions.jsonl"
             records = [json.loads(line) for line in sessions.read_text(encoding="utf-8").splitlines()]
             self.assertEqual(len(records), 3)
             self.assertTrue(all(r["actions_executed"] == 1 and r["outcome"] == "result_observed" for r in records))
+
+    def test_entire_simulated_suite_with_windows_newline_translation(self):
+        original = Path.write_text
+        def windows_write(path, data, encoding=None, errors=None, newline=None):
+            return original(path, data, encoding=encoding, errors=errors,
+                            newline="\r\n" if newline is None else newline)
+        with patch.object(Path, "write_text", windows_write):
+            self.test_entire_suite_runs_tasks_and_verifies_report_with_simulated_windows()

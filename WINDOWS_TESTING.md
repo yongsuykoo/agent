@@ -81,3 +81,7 @@ Every run saves `report.json` and model task session evidence under its own time
 ### Updating an existing installation (0.4.1)
 
 Close App Agent before setup. Setup reuses an existing Python environment instead of copying its running executable again. Start scripts launch the Python module directly so the console launcher app-agent.exe is not held open by the agent. An earlier failed pip uninstall may leave invalid-distribution warnings; extract into a fresh folder to recover without deleting the old installation or its data. A WinError 5 alone does not establish a need to run as administrator.
+
+### Windows fixture newline fix (0.4.2)
+
+The simulated Notepad save now writes literal line endings instead of asking Python to translate already-present CRLF sequences. The Windows failure was reproduced in cloud with Windows newline translation before the fix. All 86 tests pass afterwards, including an explicit regression that runs the complete simulated self-test suite under Windows newline translation. Live desktop results are still reported separately by Self-test.
