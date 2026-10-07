@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "app-agent"
+version = "0.1.0"
+description = "Windows application discovery and verified knowledge foundation"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+windows = ["pywinauto>=0.6.9,<0.7", "sounddevice>=0.5,<0.6", "numpy>=1.26,<3"]
+
+[project.scripts]
+app-agent = "app_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
