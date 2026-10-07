@@ -25,6 +25,8 @@ class Catalog:
         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS interfaces (app_id TEXT NOT NULL, generation INTEGER NOT NULL, body TEXT NOT NULL,
           observed TEXT NOT NULL, PRIMARY KEY(app_id,generation));
+        CREATE TABLE IF NOT EXISTS practice_attempts (app_id TEXT NOT NULL, generation INTEGER NOT NULL,
+          capability TEXT NOT NULL, outcome TEXT NOT NULL, body TEXT NOT NULL, created TEXT NOT NULL);
         """)
 
     def close(self):
@@ -79,9 +81,11 @@ class Catalog:
 
     def next_research(self):
         rows = self.db.execute("SELECT id FROM apps WHERE present=1 AND (status='queued' OR (status='research_failed' AND retry_at<=?)) ORDER BY attempts,updated,id", (now(),)).fetchall()
-        candidates = [self.get(row[0]) for row in rows]
+        known = {app["id"]: app for app in self.apps()}
+        candidates = [known[row[0]] for row in rows if row[0] in known]
         # Learn user-facing launchable apps before driver/utility registrations.
-        candidates.sort(key=lambda app: (not bool(app.get("app_id")), "calculator" not in app["name"].casefold(), app["name"].casefold()))
+        priority = set(self.setting("priority_apps", []))
+        candidates.sort(key=lambda app: (app["id"] not in priority, not bool(app.get("app_id")), "calculator" not in app["name"].casefold(), app["name"].casefold()))
         return candidates[0] if candidates else None
 
     def save_blueprint(self, identity, generation, blueprint):
@@ -97,7 +101,7 @@ class Catalog:
             self.db.execute("UPDATE apps SET status='research_failed',error=?,attempts=?,retry_at=? WHERE id=? AND generation=?", (str(error)[:1000], attempts, retry, identity, generation))
 
     def save_workflow(self, identity, generation, record):
-        if record.get("outcome") != "result_observed" or record.get("actions_executed", 0) < 1:
+        if record.get("outcome") not in ("result_observed", "visual_result_assessed") or record.get("actions_executed", 0) < 1:
             return False
         with self.db:
             current = self.db.execute("SELECT generation,present FROM apps WHERE id=?", (identity,)).fetchone()
@@ -109,9 +113,9 @@ class Catalog:
     def workflows(self, identity, generation):
         rows = self.db.execute("SELECT task,record FROM workflows WHERE app_id=? AND generation=? ORDER BY id DESC LIMIT 5", (identity, generation)).fetchall()
         return [{"task": row["task"], "actions": [{"action": entry["executed_action"],
-                 "target": next((control for control in entry["observation"]["controls"] if control["id"] == entry["action"]["target"]), {})}
+                 "target": next((control for control in entry["observation"]["controls"] if control["id"] == entry["action"].get("target")), {})}
                  for entry in json.loads(row["record"])["history"] if entry.get("execution") == "executed"],
-                 "status": "result_observed_once"} for row in rows]
+                 "status": json.loads(row["record"])["outcome"] + "_once"} for row in rows]
 
     def save_interface(self, identity, generation, observation):
         with self.db:
@@ -120,3 +124,28 @@ class Catalog:
     def interface(self, identity, generation):
         row = self.db.execute("SELECT body FROM interfaces WHERE app_id=? AND generation=?", (identity, generation)).fetchone()
         return json.loads(row[0]) if row else None
+
+    def coverage(self, identity, generation):
+        app = self.get(identity)
+        capabilities = (app["blueprint"] or {}).get("capabilities", [])
+        observed, visual = {}, {}
+        for row in self.db.execute("SELECT record FROM workflows WHERE app_id=? AND generation=?", (identity, generation)):
+            record = json.loads(row[0])
+            name = record.get("capability_name")
+            if name:
+                counts = visual if record["outcome"] == "visual_result_assessed" else observed
+                counts[name] = counts.get(name, 0) + 1
+        attempts = self.practice_attempts(identity, generation)
+        return [{"name": cap["name"], "observed_runs": observed.get(cap["name"], 0), "visual_assessments": visual.get(cap["name"], 0),
+                 "failed_attempts": sum(item["capability"] == cap["name"] and item["outcome"] not in ("result_observed", "visual_result_assessed") for item in attempts),
+                 "status": "result_observed" if cap["name"] in observed else "visual_result_assessed" if cap["name"] in visual else "documented_unverified"} for cap in capabilities]
+
+    def record_practice(self, identity, generation, record):
+        if not record.get("capability_name"):
+            return
+        with self.db:
+            self.db.execute("INSERT INTO practice_attempts VALUES (?,?,?,?,?,?)", (identity, generation, record["capability_name"], record["outcome"], json.dumps(record), now()))
+
+    def practice_attempts(self, identity, generation):
+        return [{"capability": row[0], "outcome": row[1], "evidence": json.loads(row[2]).get("history", [])[-2:]}
+                for row in self.db.execute("SELECT capability,outcome,body FROM practice_attempts WHERE app_id=? AND generation=? ORDER BY created DESC LIMIT 20", (identity, generation))]

@@ -1,6 +1,6 @@
 # Personal Windows app agent
 
-Version 0.2.0 adds automatic installation monitoring, bounded background research, command-to-app routing, independently proposed practice, and versioned workflow evidence. See [LEARNING_RELEASE.md](LEARNING_RELEASE.md) for setup, permission boundaries, and current coverage.
+Version 0.3.0 adds wider Windows controls, action-effect checking, bounded recovery, optional visual control, scoped practice grants, and capability-level evidence. See [ADVANCED_LEARNING.md](ADVANCED_LEARNING.md) for the current Windows test sequence and [LEARNING_RELEASE.md](LEARNING_RELEASE.md) for discovery and research behavior.
 
 Goal: independently research unfamiliar applications, build evidence-backed operational blueprints, execute tasks, and troubleshoot failures through chat and voice.
 

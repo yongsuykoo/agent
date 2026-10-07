@@ -19,11 +19,12 @@ from .discovery import scan_apps
 from .learning import ensure_blueprint, learn_next, practice_task
 from .routing import choose_app, launch_app, window_matches
 from .practice_policy import calculator_app, calculator_action
+from .app_practice import create_grant, grants_action, consume_practice_budget
 
 
 def launch(data_dir):
     root = tk.Tk()
-    root.title("App Agent — 0.2.0 Windows learning release")
+    root.title("App Agent — 0.3.0 Windows learning release")
     root.geometry("980x820")
     if not (os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")):
         key = simpledialog.askstring("Cloud AI setup", "OpenAI API key (kept in memory for this session).\nLeave blank to inspect windows without AI.", show="*", parent=root)
@@ -52,6 +53,8 @@ def launch(data_dir):
     auto_practice = tk.BooleanVar(value=initial_catalog.setting("auto_practice_calculator", False))
     learning_limit = tk.IntVar(value=initial_catalog.setting("daily_limit", 3))
     initial_catalog.close()
+    vision = tk.BooleanVar(value=False)
+    practice_grants = {}
     inventory_status = tk.StringVar(value="Scanning installed apps automatically on startup…")
     ttk.Label(frame, textvariable=inventory_status, wraplength=930).pack(anchor="w")
     app_name = tk.StringVar(value="Windows Calculator")
@@ -171,10 +174,54 @@ def launch(data_dir):
             catalog = Catalog(data_dir)
             try:
                 evidence = catalog.workflows(app["id"], app["generation"])
+                coverage = catalog.coverage(app["id"], app["generation"])
             finally:
                 catalog.close()
-            details.insert("1.0", json.dumps({"name": app["name"], "version": app.get("version"), "status": app["status"], "tested_workflows": evidence, "blueprint": app["blueprint"], "error": app["error"]}, indent=2))
+            details.insert("1.0", json.dumps({"name": app["name"], "version": app.get("version"), "status": app["status"], "capability_coverage": coverage, "tested_workflows": evidence, "blueprint": app["blueprint"], "error": app["error"]}, indent=2))
         tree.bind("<<TreeviewSelect>>", selected)
+        def request_grant():
+            selection = tree.selection()
+            if not selection or state["busy"]:
+                return
+            app = by_id[selection[0]]
+            state["busy"] = True
+            def work():
+                matches = window_matches(app, WindowsDesktop.windows())
+                if len(matches) != 1:
+                    raise RuntimeError("Open one disposable window of this app before granting practice permission.")
+                observation = WindowsDesktop(matches[0][0]).observe()
+                events.put(("grant", (app, observation)))
+            automation.submit(work)
+        ttk.Button(dialog, text="Grant practice on specific controls…", command=request_grant).pack(anchor="w")
+
+    def grant_dialog(app, observation):
+        dialog = tk.Toplevel(root)
+        dialog.title("Practice permission — " + app["name"])
+        dialog.geometry("780x450")
+        ttk.Label(dialog, text="Select ONLY controls you authorize for unattended practice on disposable data.\nThese controls can modify app data. No grant survives STOP, app version change, or agent restart.", wraplength=740).pack(anchor="w")
+        controls = [item for item in observation["controls"] if item["id"] and item.get("actions") and item["enabled"] and item["visible"] and not item.get("password")]
+        listing = tk.Listbox(dialog, selectmode="extended", exportselection=False)
+        listing.pack(fill="both", expand=True)
+        for control in controls:
+            listing.insert("end", f"{control['type']}: {control['name']} [{', '.join(control['actions'])}]")
+        def commit():
+            try:
+                grant = create_grant(app, observation, [controls[index]["id"] for index in listing.curselection()])
+                if not messagebox.askokcancel("Confirm practice scope", f"Allow the agent to use these {len(grant['controls'])} controls independently in {observation['window']}? The grant is for this window/process only. Maximum three background practice attempts per day across apps."):
+                    return
+                practice_grants[app["id"]] = grant
+                catalog = Catalog(data_dir)
+                try:
+                    priorities = catalog.setting("priority_apps", [])
+                    if app["id"] not in priorities:
+                        catalog.set_setting("priority_apps", [app["id"], *priorities][:50])
+                finally:
+                    catalog.close()
+                append("Session practice permission granted for " + app["name"])
+                dialog.destroy()
+            except ValueError as error:
+                messagebox.showerror("Practice permission", str(error))
+        ttk.Button(dialog, text="Grant selected controls", command=commit).pack(anchor="w")
 
     def resolve_approval(allowed):
         pending = state["approval"]
@@ -189,6 +236,7 @@ def launch(data_dir):
     def stop():
         cancel.set()
         task_permission.clear()
+        practice_grants.clear()
         state["learning_paused"] = True
         if state["recording"]:
             if state["voice_timer"]:
@@ -231,6 +279,9 @@ def launch(data_dir):
         if mode not in ("observe", "research", "practice") and not task:
             return
         if mode in ("run", "diagnose", "practice") and not messagebox.askokcancel("Cloud data sharing", "The task, installed app names used to choose an app, and selected-window control text will be sent to OpenAI. Automatic mode may open the chosen installed app. Avoid sensitive windows. Continue?"):
+            return
+        use_vision = vision.get() and mode in ("run", "practice")
+        if use_vision and not messagebox.askokcancel("Screenshot sharing", "Send images of the selected app window to OpenAI for this task? Images can include visible sensitive information and overlapping windows. Avoid confidential data. Coordinate clicks require your task/step authorization."):
             return
         state["busy"] = True
         cancel.clear()
@@ -316,14 +367,18 @@ def launch(data_dir):
                     finally:
                         catalog.close()
                     if mode == "practice":
-                        plan = practice_task(blueprint, CloudResearcher())
+                        plan = practice_task(blueprint, CloudResearcher(), previous)
                         actual_task = plan["task"]
                         emit("Self-generated practice task: " + actual_task)
                     if cancel.is_set():
                         return
-                    record = TaskRunner(WindowsDesktop(selected_handle), CloudResearcher(), approve, emit, data_dir, cancel).run(actual_task, blueprint, previous_workflows=previous)
+                    record = TaskRunner(WindowsDesktop(selected_handle), CloudResearcher(), approve, emit, data_dir, cancel).run(actual_task, blueprint, previous_workflows=previous, use_vision=use_vision)
+                    if mode == "practice":
+                        record["capability_name"] = plan["capability_name"]
                     catalog = Catalog(data_dir)
                     try:
+                        if mode == "practice":
+                            catalog.record_practice(app["id"], app["generation"], record)
                         if catalog.save_workflow(app["id"], app["generation"], record):
                             emit("Learned workflow stored with app version and execution evidence; future tasks can reuse it.")
                         observed = next((entry["verification"] for entry in reversed(record["history"]) if "verification" in entry), None)
@@ -344,7 +399,7 @@ def launch(data_dir):
                         store.save_research(blueprint)
                 finally:
                     store.close()
-                TaskRunner(WindowsDesktop(selected_handle), CloudResearcher(), approve, emit, data_dir, cancel).run(task, blueprint)
+                TaskRunner(WindowsDesktop(selected_handle), CloudResearcher(), approve, emit, data_dir, cancel).run(task, blueprint, use_vision=use_vision)
         state_window_snapshot = list(state["windows"])
         automation.submit(work)
 
@@ -417,6 +472,8 @@ def launch(data_dir):
                 inventory_status.set(payload)
             elif kind == "selected_app":
                 app_name.set(payload)
+            elif kind == "grant":
+                grant_dialog(*payload)
             elif kind == "done":
                 state["busy"] = False
                 task_permission.clear()
@@ -432,7 +489,7 @@ def launch(data_dir):
                     pending["event"].set()
                     continue
                 state["approval"] = pending
-                target = next(item for item in observation["controls"] if item["id"] == action["target"])
+                target = next((item for item in observation["controls"] if item["id"] == action.get("target")), {"name": f"image coordinates ({action.get('x')}, {action.get('y')})"})
                 approval_text.set(f"{observation['window']}: {action['kind']} on {target['name']!r}\nText: {action.get('text', '')}\nReason: {action['reason']}")
                 approve_button.configure(state="normal")
                 reject_button.configure(state="normal")
@@ -448,6 +505,7 @@ def launch(data_dir):
     ttk.Spinbox(learning_bar, from_=1, to=50, textvariable=learning_limit, width=4, command=learning_settings).pack(side="left")
     ttk.Button(learning_bar, text="Apply / resume", command=learning_settings).pack(side="left", padx=5)
     ttk.Checkbutton(learning_bar, text="Auto-practice Calculator", variable=auto_practice, command=practice_settings).pack(side="left", padx=5)
+    ttk.Checkbutton(frame, text="Use selected-app screenshots for visual control (off by default; consent required)", variable=vision).pack(anchor="w")
     for label, mode in (("Run task", "run"), ("Research app", "research"), ("Practice app", "practice"), ("Inspect window", "observe"), ("Troubleshoot", "diagnose")):
         ttk.Button(actions, text=label, command=lambda mode=mode: start(mode)).pack(side="left", padx=2)
     voice_button = ttk.Button(actions, text="Push-to-talk", command=microphone)
@@ -523,12 +581,37 @@ def launch(data_dir):
                                         if matches:
                                             break
                                         cancel.wait(0.5)
-                                if len(matches) == 1 and not cancel.is_set():
+                                if len(matches) == 1 and not cancel.is_set() and consume_practice_budget(catalog):
                                     emit = lambda text: events.put(("log", text))
-                                    plan = practice_task(known["blueprint"], CloudResearcher())
+                                    plan = practice_task(known["blueprint"], CloudResearcher(), catalog.workflows(known["id"], known["generation"]))
                                     emit("Autonomous Calculator experiment: " + plan["task"])
                                     record = TaskRunner(WindowsDesktop(matches[0][0]), CloudResearcher(), calculator_action, emit, data_dir, cancel).run("Clear the current calculation first. " + plan["task"], known["blueprint"])
+                                    record["capability_name"] = plan["capability_name"]
+                                    catalog.record_practice(known["id"], known["generation"], record)
                                     catalog.save_workflow(known["id"], known["generation"], record)
+                        # Generic practice is scoped to explicit session grants;
+                        # no arbitrary app is opened or granted controls by a model.
+                        for identity, grant in list(practice_grants.items()):
+                            if cancel.is_set():
+                                break
+                            try:
+                                known = catalog.get(identity)
+                            except KeyError:
+                                continue
+                            if known["generation"] != grant["generation"] or not known["blueprint"]:
+                                continue
+                            day = time.strftime("%Y-%m-%d", time.localtime())
+                            key = f"practice:{identity}:{known['generation']}"
+                            if catalog.setting(key) == day or not consume_practice_budget(catalog):
+                                continue
+                            catalog.set_setting(key, day)
+                            emit = lambda text: events.put(("log", text))
+                            plan = practice_task(known["blueprint"], CloudResearcher(), catalog.workflows(identity, known["generation"]))
+                            emit(f"Independent practice in {known['name']}: {plan['task']}")
+                            record = TaskRunner(WindowsDesktop(grant["window_handle"]), CloudResearcher(), lambda action, observation: grants_action(grant, action, observation), emit, data_dir, cancel).run(plan["task"], known["blueprint"], max_steps=12)
+                            record["capability_name"] = plan["capability_name"]
+                            catalog.record_practice(identity, known["generation"], record)
+                            catalog.save_workflow(identity, known["generation"], record)
                         catalog_summary(catalog)
                     finally:
                         catalog.close()

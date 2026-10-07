@@ -1,6 +1,6 @@
 # Windows test release
 
-The current version is 0.2.0. See LEARNING_RELEASE.md for automatic discovery, new-install/update monitoring, background study, automatic app selection, independently generated practice, and versioned workflow evidence. These additions require real Windows acceptance testing.
+The current version is 0.3.0. See ADVANCED_LEARNING.md for wider Windows control, recovery, visual mode, and practice grants. See LEARNING_RELEASE.md for discovery, monitoring, and background study. The newest additions require real Windows acceptance testing.
 
 This is a supervised prototype ready for initial Windows testing, not a completed universal computer agent. It researches apps without demonstrations and attempts tasks through Windows accessibility controls. Each mutation requires approval. Apps with custom inaccessible controls, canvas interfaces, elevated windows, complex dialogs, or unsupported UI Automation patterns may block it.
 

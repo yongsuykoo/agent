@@ -64,3 +64,17 @@ class CatalogTests(unittest.TestCase):
         self.catalog.close()
         self.catalog = Catalog(self.directory.name)
         self.assertEqual(self.catalog.setting("daily_limit"), 3)
+
+    def test_coverage_separates_observed_results_visual_assessments_and_failures(self):
+        self.catalog.sync(snapshot([app()]))
+        current = self.catalog.get(app()["id"])
+        self.catalog.save_blueprint(current["id"], current["generation"], {"capabilities": [{"name": "Add"}]})
+        failed = {"task": "Add", "capability_name": "Add", "outcome": "stalled", "actions_executed": 1, "history": []}
+        self.catalog.record_practice(current["id"], current["generation"], failed)
+        visual = {**failed, "outcome": "visual_result_assessed"}
+        self.catalog.save_workflow(current["id"], current["generation"], visual)
+        coverage = self.catalog.coverage(current["id"], current["generation"])[0]
+        self.assertEqual(coverage["status"], "visual_result_assessed")
+        self.assertEqual(coverage["observed_runs"], 0)
+        self.assertEqual(coverage["visual_assessments"], 1)
+        self.assertEqual(coverage["failed_attempts"], 1)
