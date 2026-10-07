@@ -13,6 +13,30 @@ def literal_keys(text):
     return "".join("{" + character + "}" if character in "+^%~{}()" else character for character in text)
 
 
+def native_edit(control, parent):
+    """Resolve only a native Edit child belonging to the selected window."""
+    if sys.platform != "win32" or control.element_info.control_type != "Edit":
+        return None
+    from pywinauto import Desktop
+    from pywinauto import win32functions
+    handle = control.handle
+    if not handle or not win32functions.IsChild(parent.handle, handle):
+        return None
+    wrapper = Desktop(backend="win32").window(handle=handle).wrapper_object()
+    if wrapper.class_name() != "Edit" or wrapper.process_id() != parent.process_id():
+        return None
+    return wrapper
+
+
+def password_state(control, native=None):
+    if native is not None:
+        return bool(native.style() & 0x0020)  # ES_PASSWORD
+    try:
+        return bool(control.element_info.element.CurrentIsPassword)
+    except Exception:
+        return None
+
+
 def text_readonly(control):
     try:
         value = control.iface_value.CurrentIsReadOnly
@@ -93,7 +117,7 @@ class WindowsDesktop:
                                "actions": [], "value": "", "password": False, "state": {}}
                 try:
                     element = info.element
-                    item["password"] = bool(element.CurrentIsPassword)
+                    item["password"] = password_state(control)
                     for name, property_id in PATTERNS.items():
                         try:
                             if element.GetCurrentPropertyValue(property_id):
@@ -111,9 +135,19 @@ class WindowsDesktop:
                         item["state"]["scroll"] = [float(control.iface_scroll.CurrentHorizontalScrollPercent), float(control.iface_scroll.CurrentVerticalScrollPercent)]
                 except Exception:
                     pass
+                # Native edit support must survive failures in UIA property probing.
+                native = native_edit(control, self.window)
+                if native is not None:
+                    item["password"] = password_state(control, native)
+                    if not item["password"]:
+                        item["value"] = native.window_text()[:2000]
+                        item["readonly"] = bool(native.style() & 0x0800)
+                        item["actions"] = [a for a in item["actions"] if a != "type"]
+                        if not item["readonly"]:
+                            item["actions"].append("type")
                 if info.control_type in CLICK_TYPES:
                     item["actions"].append("click")
-                if item["password"]:
+                if item["password"] is not False:
                     item["name"] = "[password control]"
                     item["value"] = ""
                     item["actions"] = []
@@ -144,11 +178,17 @@ class WindowsDesktop:
         if not control.is_visible() or not control.is_enabled():
             raise RuntimeError("Target is hidden or disabled; re-observation required.")
         self.window.set_focus()
-        if bool(control.element_info.element.CurrentIsPassword):
+        native = native_edit(control, self.window)
+        if password_state(control, native) is not False:
             raise ValueError("Password controls cannot be automated.")
         if action["kind"] == "invoke":
             control.invoke()
         elif action["kind"] == "type":
+            if native is not None:
+                if native.style() & 0x0800:
+                    raise ValueError("Cannot edit a read-only control.")
+                native.set_edit_text(action["text"])
+                return
             if control.element_info.control_type in ("Edit", "Document", "ComboBox"):
                 if text_readonly(control) is not False:
                     raise ValueError("Text target is read-only or its editability is unknown.")

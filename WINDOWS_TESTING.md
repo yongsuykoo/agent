@@ -56,3 +56,7 @@ Cloud validation: core, planner, adapter, and voice transport tests use simulate
 Version 0.1.3 fixes JSON-mode input validation for research extraction and desktop planning. It explicitly requests JSON in the input message, as required by the API. Thirty automated tests pass; authenticated end-to-end behavior still requires Windows testing.
 
 Close the agent, download the current repository ZIP from GitHub, extract into a new folder, and rerun Setup.cmd then Start.cmd. App memory remains in `%LOCALAPPDATA%\AppAgent`. Version 0.1.1 includes improved API compatibility and detailed error reporting; its 27 automated tests passed in the cloud.
+
+### Classic Notepad text entry (0.3.2)
+
+Native Windows Edit controls now use a window- and process-checked Win32 adapter when UI Automation omits text-entry patterns. Password and read-only styles block writes. Inspect window should list `type` for the blank Notepad Text Editor, and subsequent observations read its text back. This path has simulated regression coverage; live Windows validation remains required.

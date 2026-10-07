@@ -36,6 +36,35 @@ class DesktopAdapterTests(unittest.TestCase):
         desktop.controls = [desktop.window, control]
         return desktop, control
 
+    def test_classic_edit_without_uia_patterns_is_advertised_and_verified(self):
+        desktop, control = self.adapter()
+        desktop.window.descendants.return_value = [control]
+        desktop.window.element_info.name = "Untitled - Notepad"
+        desktop.window.element_info.control_type = "Window"
+        control.element_info.name = "Text Editor"
+        control.element_info.automation_id = "15"
+        type(control.element_info.element).CurrentIsPassword = PropertyMock(
+            side_effect=RuntimeError("UIA property unavailable"))
+        native = Mock()
+        native.style.return_value = 0
+        native.window_text.return_value = "Hello from my personal agent"
+        with patch("app_agent.desktop.native_edit", side_effect=lambda c, p: native if c is control else None):
+            observed = desktop.observe()["controls"][1]
+            self.assertIn("type", observed["actions"])
+            self.assertEqual(observed["value"], "Hello from my personal agent")
+            desktop.act({"kind": "type", "target": 1, "text": "hello"})
+        native.set_edit_text.assert_called_once_with("hello")
+
+    def test_native_password_and_readonly_edits_block_writes(self):
+        for style in (0x0020, 0x0800):
+            desktop, control = self.adapter()
+            native = Mock()
+            native.style.return_value = style
+            with patch("app_agent.desktop.native_edit", return_value=native):
+                with self.assertRaises(ValueError):
+                    desktop.act({"kind": "type", "target": 1, "text": "hello"})
+            native.set_edit_text.assert_not_called()
+
     def test_invoke_and_text_use_accessibility_methods(self):
         desktop, control = self.adapter()
         desktop.act({"kind": "invoke", "target": 1})
