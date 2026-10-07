@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 import queue
 import re
-import shutil
 import subprocess
 import sys
 import threading
@@ -16,16 +15,13 @@ from .automation_worker import AutomationWorker
 from .remote_bridge import BridgeSession, execute_job, make_server
 from .remote_protocol import fingerprint
 from .research import validate_api_key
+from .connection_launcher import find_tunnel_executable
 
 
 def tunnel_executable():
-    found = shutil.which("cloudflared")
+    found = find_tunnel_executable()
     if found:
         return found
-    # WinGet portable packages may be installed after this terminal opened.
-    link = Path(os.getenv("LOCALAPPDATA", "")) / "Microsoft/WinGet/Links/cloudflared.exe"
-    if link.is_file():
-        return str(link)
     raise RuntimeError("Cloudflared is missing. Run windows\\Connect.cmd so WinGet can install the verified package.")
 
 
@@ -36,7 +32,7 @@ def launch_connection(data_dir, controller_key):
     controller_fingerprint = fingerprint(public)
     executable = tunnel_executable()
     root = tk.Tk()
-    root.title("App Agent connection — 0.6.0")
+    root.title("App Agent connection — 0.6.1")
     root.geometry("900x650")
     frame = ttk.Frame(root, padding=16)
     frame.pack(fill="both", expand=True)

@@ -118,3 +118,7 @@ The 0.5.0 suite adds check 13, AI documentation-to-practice learning. It researc
 ### Cloud-directed Windows testing (0.6.0)
 
 [WINDOWS_CONNECTION.md](WINDOWS_CONNECTION.md) describes the locally launched Connect.cmd companion. After pairing, the controller can run self-tests and retrieve reports directly; users do not enter test commands or upload evidence manually. Other app tasks require specific local control grants. Real protocol/loopback HTTP tests pass in the cloud; native task execution in those regressions is simulated. WinGet installation, the outbound relay, and live desktop pairing remain pending. The prior 0.4.6 twelve-check live report remains valid evidence for that release; publishing a connection helper does not establish a newer live result.
+
+### PowerShell execution-policy launcher fix (0.6.1)
+
+The received Windows error showed Connect.ps1 blocked before the companion started. Connect.cmd now launches a Python bootstrap directly; no PowerShell execution-policy change is made. The bootstrap installs cloudflared through verified WinGet when needed and finds portable links or refreshed registry PATH values. All 154 cloud regression tests pass, including installer failures, stale PATH, and startup with spaces in the folder path. Live companion pairing remains pending.

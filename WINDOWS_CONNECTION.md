@@ -1,12 +1,12 @@
-# Connect the Windows desktop to the cloud — 0.6.0
+# Connect the Windows desktop to the cloud — 0.6.1
 
 This companion makes a temporary outbound connection from your logged-in Windows desktop. The cloud controller can then inspect apps/windows, run the automatic self-test, research apps, and request tasks in locally granted controls. It is not a desktop video stream or a remote shell.
 
 ## Start the companion
 
 1. Close the old App Agent. Download the current repository ZIP and extract into a fresh folder. Run `windows\Setup.cmd`.
-2. Double-click **`windows\Connect.cmd`**. It installs Cloudflare's `cloudflared` through WinGet when missing; WinGet's integrity checks remain enabled. The connection uses Cloudflare's temporary Quick Tunnel service. No inbound firewall rule or router port-forward is created. Windows may require approval to install the package. If WinGet is unavailable, install cloudflared using the official Cloudflare Windows instructions and retry.
-3. In **App Agent connection — 0.6.0**, leave automatic tests enabled. For live model tests/research, enter your OpenAI API key locally and enable the AI option. It incurs provider charges. Enable cloud app tasks if you want the controller to operate other disposable app windows after local grants.
+2. Double-click **`windows\Connect.cmd`**. Version 0.6.1 launches through Python, so PowerShell script execution is not required and its execution policy is unchanged. It installs Cloudflare's `cloudflared` through WinGet when missing; WinGet's integrity checks remain enabled. The connection uses Cloudflare's temporary Quick Tunnel service. No inbound firewall rule or router port-forward is created. Windows may require approval to install the package. If WinGet is unavailable, install cloudflared using the official Cloudflare Windows instructions and retry.
+3. In **App Agent connection — 0.6.1**, leave automatic tests enabled. For live model tests/research, enter your OpenAI API key locally and enable the AI option. It incurs provider charges. Enable cloud app tasks if you want the controller to operate other disposable app windows after local grants.
 4. Click **Start connection** and accept the displayed scope. Copy the **entire pairing link** and send it to this chat. The link contains the temporary relay address and the Windows session's public verification key. It contains no API key, password, or private key.
 5. Leave the helper open and the desktop unlocked. The controller can now submit jobs and read encrypted results directly. You do not enter test commands or upload reports manually. Native tests clear Calculator and operate their own disposable Notepad document; avoid touching the desktop while they run.
 
