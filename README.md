@@ -4,6 +4,8 @@ Version 0.4.6 includes automatic Windows self-testing. Click **Self-test** in th
 
 Goal: independently research unfamiliar applications, build evidence-backed operational blueprints, execute tasks, and troubleshoot failures through chat and voice.
 
+Live Windows validation: the uploaded 0.4.6 self-test report passed all 12 checks with Python 3.14.0. It discovered 404 installed apps, verified three native Calculator calculations, verified Notepad text entry/replacement, punctuation, Unicode, multiline text and saving from disk, and passed two AI Notepad tasks plus an AI Calculator task (7 executed actions, displayed result 45). This validates those operations on the tested computer; discovery of the other apps does not establish operational mastery. The general all-app learning goal remains unfinished.
+
 This prototype provides desktop registry, Start-menu, and Microsoft Store discovery, persistent app blueprints, and cloud AI documentation research. Its Windows interface supports typed tasks, push-to-talk transcription, supervised accessibility control, local session evidence, and troubleshooting advice. Apps without registration or Start-menu entries are not comprehensively discovered. See WINDOWS_TESTING.md and LEARNING_RELEASE.md for the test release.
 
 ## Development
