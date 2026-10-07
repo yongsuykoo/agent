@@ -3,7 +3,9 @@ import json
 import os
 import sqlite3
 from pathlib import Path
-from .discovery import installed_apps
+from .discovery import installed_apps, scan_apps
+from .catalog import Catalog
+from .learning import learn_next
 from .knowledge import KnowledgeStore
 from .research import CloudResearcher, research_app
 
@@ -16,6 +18,10 @@ def main():
     commands.add_parser("ui", help="Launch Windows chat and push-to-talk interface")
     commands.add_parser("doctor", help="Check runtime prerequisites without revealing credentials")
     commands.add_parser("windows-smoke", help="Open Calculator and test three calculations; clears its current calculation")
+    commands.add_parser("scan", help="Discover apps and persist installation/version changes")
+    commands.add_parser("apps", help="List discovered apps and documentation status")
+    study = commands.add_parser("study-next", help="Research one queued app within the daily background budget")
+    study.add_argument("--daily-limit", type=int, default=3, choices=range(1, 51))
     blueprint = commands.add_parser("blueprint", help="Create or inspect an app knowledge record")
     blueprint.add_argument("name")
     blueprint.add_argument("--create", action="store_true")
@@ -35,6 +41,17 @@ def main():
         elif args.command in ("doctor", "windows-smoke"):
             from .windows_checks import doctor, calculator_smoke
             result = doctor() if args.command == "doctor" else calculator_smoke()
+        elif args.command in ("scan", "apps", "study-next"):
+            catalog = Catalog(args.data_dir)
+            try:
+                if args.command == "scan":
+                    result = catalog.sync(scan_apps())
+                elif args.command == "apps":
+                    result = [{key: value for key, value in app.items() if key not in ("blueprint", "location")} for app in catalog.apps()]
+                else:
+                    result = learn_next(catalog, CloudResearcher(), lambda text: print(text), args.daily_limit)
+            finally:
+                catalog.close()
         else:
             store = KnowledgeStore(args.data_dir / "knowledge.sqlite3")
             try:

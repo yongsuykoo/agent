@@ -4,6 +4,8 @@ Set-Location (Join-Path $PSScriptRoot '..')
 if ($LASTEXITCODE -ne 0) { throw 'Prerequisite check failed.' }
 & .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 if ($LASTEXITCODE -ne 0) { throw 'Core tests failed.' }
+& .\.venv\Scripts\app-agent.exe scan
+if ($LASTEXITCODE -ne 0) { throw 'App inventory scan failed.' }
 Write-Host 'Calculator test will clear its current calculation and leave it open.'
 & .\.venv\Scripts\app-agent.exe windows-smoke
 if ($LASTEXITCODE -ne 0) { throw 'Windows Calculator test failed. See output for diagnosis.' }

@@ -1,8 +1,10 @@
 # Personal Windows app agent
 
+Version 0.2.0 adds automatic installation monitoring, bounded background research, command-to-app routing, independently proposed practice, and versioned workflow evidence. See [LEARNING_RELEASE.md](LEARNING_RELEASE.md) for setup, permission boundaries, and current coverage.
+
 Goal: independently research unfamiliar applications, build evidence-backed operational blueprints, execute tasks, and troubleshoot failures through chat and voice.
 
-This prototype provides read-only Windows app discovery, persistent app blueprints, and cloud AI documentation research. A Windows desktop interface now supports typed tasks, push-to-talk transcription, supervised accessibility control, local session evidence, and troubleshooting advice. See WINDOWS_TESTING.md for the test release. Registry discovery covers conventional desktop installations; Store apps and portable programs need additional discovery adapters.
+This prototype provides desktop registry, Start-menu, and Microsoft Store discovery, persistent app blueprints, and cloud AI documentation research. Its Windows interface supports typed tasks, push-to-talk transcription, supervised accessibility control, local session evidence, and troubleshooting advice. Apps without registration or Start-menu entries are not comprehensively discovered. See WINDOWS_TESTING.md and LEARNING_RELEASE.md for the test release.
 
 ## Development
 

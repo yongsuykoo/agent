@@ -1,5 +1,7 @@
 # Windows test release
 
+The current version is 0.2.0. See LEARNING_RELEASE.md for automatic discovery, new-install/update monitoring, background study, automatic app selection, independently generated practice, and versioned workflow evidence. These additions require real Windows acceptance testing.
+
 This is a supervised prototype ready for initial Windows testing, not a completed universal computer agent. It researches apps without demonstrations and attempts tasks through Windows accessibility controls. Each mutation requires approval. Apps with custom inaccessible controls, canvas interfaces, elevated windows, complex dialogs, or unsupported UI Automation patterns may block it.
 
 ## Quick start
@@ -10,7 +12,7 @@ This is a supervised prototype ready for initial Windows testing, not a complete
 4. Double-click `windows\Test.cmd`. This opens Calculator and checks `23 + 19 = 42`, `8 / 2 = 4`, and `9 - 3 = 6`. It clears the existing calculation and leaves Calculator open. No API key is required.
 5. Double-click `windows\Start.cmd`. Enter an OpenAI API key in the masked prompt. It is kept in memory for that session, not saved to disk. Leaving it blank permits local inspection only. API usage is billed by the provider.
 6. Open Calculator, select Standard mode, click Refresh windows, and select its window. Set the research name to Windows Calculator.
-7. Click Research app. Confirm that the returned blueprint has real source URLs and capabilities marked `documented_unverified`.
+7. Click Research app. Confirm that the returned blueprint has real source URLs and capabilities marked `documented_unverified`. Apps & knowledge displays version-specific catalog blueprints.
 8. Enter `Calculate 23 plus 19 and verify the result`, click Run task, consent to sharing the selected window's text, and review each proposed action before approving it. With no stored blueprint, Run researches the app first.
 
 The command-line and PowerShell alternatives remain available in `windows`.
@@ -34,7 +36,7 @@ OpenAI receives app names, task text, public documentation, selected-window cont
 
 Blueprints and task session evidence are stored under `%LOCALAPPDATA%\AppAgent`. Session records can contain sensitive text you typed or visible in the selected window. They are ordinary local files, not encrypted by the app. Close the agent and delete that folder to reset memory. Do not include it in support uploads without reviewing its contents.
 
-The runner supports accessibility Invoke and Edit value patterns in one selected window. It has no shell execution, installer, arbitrary file-editing, or automatic administrator elevation tools. Button invocation can still change or delete app data: review approvals carefully and start with disposable data. Multi-app navigation, visual fallback, autonomous repair, model retraining, and universal app coverage remain future work.
+The runner supports accessibility Invoke and Edit value patterns in one selected window. It has no model-supplied shell execution, installer, arbitrary file-editing, or automatic administrator elevation tools. A fixed read-only PowerShell script is used for OS app discovery. Button invocation can still change or delete app data: review approvals carefully and start with disposable data. Automatic app selection and launching use discovered Start-menu identities. Complex multi-app navigation, visual fallback, autonomous repair, model retraining, and universal app coverage remain future work.
 
 ## Troubleshooting setup
 
