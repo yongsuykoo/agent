@@ -18,6 +18,8 @@ def main():
     commands.add_parser("ui", help="Launch Windows chat and push-to-talk interface")
     commands.add_parser("doctor", help="Check runtime prerequisites without revealing credentials")
     commands.add_parser("windows-smoke", help="Open Calculator and test three calculations; clears its current calculation")
+    automatic = commands.add_parser("self-test", help="Automatically test Windows inventory, Calculator and disposable Notepad; save a report")
+    automatic.add_argument("--with-cloud", action="store_true", help="Also run AI tasks; prompts securely for a missing API key")
     commands.add_parser("scan", help="Discover apps and persist installation/version changes")
     commands.add_parser("apps", help="List discovered apps and documentation status")
     study = commands.add_parser("study-next", help="Research one queued app within the daily background budget")
@@ -35,6 +37,29 @@ def main():
         if args.command == "ui":
             from .ui import launch
             launch(args.data_dir)
+            return
+        if args.command == "self-test":
+            import sys
+            if sys.platform != "win32":
+                raise RuntimeError("Live self-test needs an interactive Windows computer; cloud Linux cannot control your PC.")
+            from .automation_worker import initialize_com
+            cleanup = initialize_com()
+            try:
+                from .self_test import self_test
+                cloud = None
+                if args.with_cloud:
+                    key = os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")
+                    if not key:
+                        from getpass import getpass
+                        key = getpass("OpenAI API key (hidden; blank skips cloud checks): ").strip()
+                    if key:
+                        cloud = CloudResearcher(key=key)
+                report = self_test(args.data_dir, cloud=cloud)
+                print(json.dumps(report, indent=2))
+                if report["status"] in ("failed", "cancelled"):
+                    parser.exit(1, "Self-test did not pass; see the saved report.\n")
+            finally:
+                cleanup()
             return
         if args.command == "discover":
             result = installed_apps()

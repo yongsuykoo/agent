@@ -24,7 +24,7 @@ from .app_practice import create_grant, grants_action, consume_practice_budget
 
 def launch(data_dir):
     root = tk.Tk()
-    root.title("App Agent — 0.3.4 Windows learning release")
+    root.title("App Agent — 0.4.0 Windows learning release")
     root.geometry("980x820")
     if not (os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")):
         key = simpledialog.askstring("Cloud AI setup", "OpenAI API key (kept in memory for this session).\nLeave blank to inspect windows without AI.", show="*", parent=root)
@@ -269,6 +269,20 @@ def launch(data_dir):
         finally:
             events.put(("done", None))
 
+    def start_self_test():
+        if state["busy"] or state["recording"]:
+            return
+        state["busy"] = True
+        cancel.clear()
+        task_permission.clear()
+        status.set("Self-testing disposable Notepad and Calculator; leave the desktop untouched. STOP cancels.")
+        def work():
+            from .self_test import self_test
+            cloud = CloudResearcher() if (os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")) else None
+            report = self_test(data_dir, cloud=cloud, emit=lambda text: events.put(("log", text)), cancel=cancel)
+            events.put(("log", f"Self-test {report['status']}: {report['counts']}. Report: {report['report_path']}"))
+        automation.submit(work)
+
     def start(mode):
         if state["busy"] or state["recording"]:
             return
@@ -500,6 +514,7 @@ def launch(data_dir):
     ttk.Button(toolbar, text="Scan apps", command=scan_inventory).pack(side="left", padx=5)
     ttk.Button(toolbar, text="Apps & knowledge", command=show_apps).pack(side="left", padx=5)
     ttk.Button(toolbar, text="Open Calculator", command=lambda: subprocess.Popen(["calc.exe"])).pack(side="left", padx=5)
+    ttk.Button(toolbar, text="Self-test", command=start_self_test).pack(side="left", padx=5)
     ttk.Checkbutton(learning_bar, text="Automatically study discovered/new apps", variable=auto_learn, command=learning_settings).pack(side="left")
     ttk.Label(learning_bar, text="Daily app limit:").pack(side="left", padx=5)
     ttk.Spinbox(learning_bar, from_=1, to=50, textvariable=learning_limit, width=4, command=learning_settings).pack(side="left")

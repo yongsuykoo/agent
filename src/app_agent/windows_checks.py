@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from .desktop import WindowsDesktop
 
@@ -21,33 +22,43 @@ def doctor():
     return report
 
 
-def calculator_smoke():
+def calculator_smoke(cancel=None):
     if sys.platform != "win32":
         raise RuntimeError("Calculator smoke test requires Windows.")
+    cancel = cancel or threading.Event()
+    if cancel.is_set():
+        raise RuntimeError("Calculator test stopped.")
     subprocess.Popen(["calc.exe"])
     desktop = None
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
+        if cancel.is_set():
+            raise RuntimeError("Calculator test stopped.")
         for handle, title in WindowsDesktop.windows():
-            candidate = WindowsDesktop(handle)
-            observation = candidate.observe()
+            try:
+                candidate = WindowsDesktop(handle)
+                observation = candidate.observe()
+            except Exception:
+                continue
             ids = {control["automation_id"] for control in observation["controls"]}
             if {"num2Button", "CalculatorResults", "clearButton"} <= ids:
                 desktop = candidate
                 break
         if desktop:
             break
-        time.sleep(0.25)
+        cancel.wait(0.25)
     if desktop is None:
         raise RuntimeError("Calculator standard controls not found. Open Calculator in Standard mode and retry.")
 
     def press(automation_id):
+        if cancel.is_set():
+            raise RuntimeError("Calculator test stopped.")
         observation = desktop.observe()
         matches = [control for control in observation["controls"] if control["automation_id"] == automation_id]
         if len(matches) != 1:
             raise RuntimeError(f"Calculator control unavailable: {automation_id}")
         desktop.act({"kind": "invoke", "target": matches[0]["id"]})
-        time.sleep(0.15)
+        cancel.wait(0.15)
 
     checks = []
     for sequence, expected in ((["num2Button", "num3Button", "plusButton", "num1Button", "num9Button", "equalButton"], "42"),

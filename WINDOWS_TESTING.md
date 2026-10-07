@@ -68,3 +68,12 @@ The session log now prints the submitted Task command. Explicit `Type exactly:` 
 ### Windows setup test fix (0.3.4)
 
 Desktop adapter unit tests now mock the native-edit boundary on every platform so fake window handles cannot reach ctypes Windows APIs. Setup.cmd distinguishes Python environment creation, dependency installation, and test failures. All 74 tests pass in cloud, and all 11 adapter tests pass with the Windows platform branch simulated and native package imports blocked. Actual Windows Setup.cmd validation remains a local test.
+# Automatic self-test (0.4.0)
+
+After setup, click **Self-test** in the agent. It reuses the API key already entered for that session. Alternatively, `windows\SelfTest.cmd` prompts for the key securely and runs the same suite. Leave the desktop untouched while the suite works. The GUI STOP button cancels remaining checks; an in-flight API request can take up to 90 seconds to return. Close no test windows during execution.
+
+The suite checks runtime prerequisites, installed-app inventory, three Calculator calculations, a new disposable Notepad document, text entry, exact replacement, literal punctuation, Unicode, multiline text, and saving with independent disk verification. With a key, it also runs two model-driven Notepad tasks and one model-driven Calculator task. The model can type only into the fixture editor and invoke only approved arithmetic controls. Existing user documents are not selected. Calculator's current calculation changes. The test document remains open, and its files remain under `%LOCALAPPDATA%\AppAgent\self-tests`.
+
+Every run saves `report.json` and model task session evidence under its own timestamped directory. Each check reports passed, failed, skipped, or cancelled. Missing cloud credentials produce skipped checks and an overall partial result. Failures do not prevent independent checks from running. These checks verify the named operations only; they do not certify every installed application's capabilities. No screenshot upload is used by this suite.
+
+`windows\Test.cmd` runs the core regression tests and the native self-test without requesting a cloud key. GitHub Actions is configured to run simulated regression tests on Windows and Linux with Python 3.11 and 3.14. Hosted regression jobs do not run the interactive Windows suite or call a live model. A configured workflow is not evidence of a passed CI run.

@@ -6,10 +6,10 @@ if errorlevel 1 goto fail
 if errorlevel 1 goto fail
 .venv\Scripts\app-agent.exe scan
 if errorlevel 1 goto fail
-echo Calculator smoke test clears its current calculation and leaves it open.
-.venv\Scripts\app-agent.exe windows-smoke
+echo Automatic checks use disposable Notepad data and clear Calculator. Leave the desktop untouched.
+.venv\Scripts\app-agent.exe self-test
 if errorlevel 1 goto fail
-echo Windows checks passed.
+echo Native Windows checks passed. AI checks require the Self-test button or windows\SelfTest.cmd.
 pause
 exit /b 0
 :fail
