@@ -122,7 +122,7 @@ class SelfTestTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "interactive Windows"):
                 self_test("unused")
 
-    def test_entire_suite_runs_tasks_and_verifies_report_with_simulated_windows(self):
+    def test_entire_suite_runs_tasks_and_verifies_report_with_simulated_windows(self, changed_process=False):
         from test_catalog import app, snapshot as inventory_snapshot
         class Desktop:
             def __init__(self, title, calculator=False):
@@ -132,6 +132,8 @@ class SelfTestTests(unittest.TestCase):
             def observe(self):
                 current = snapshot(self.value, title=self.title)
                 if self.calculator:
+                    if changed_process:
+                        current["process_id"] = 82
                     current["controls"] = [
                         {"id": 1, "name": "Two", "type": "Button", "automation_id": "num2Button", "actions": ["invoke"], "visible": True, "enabled": True},
                         {"id": 2, "name": self.value, "type": "Text", "automation_id": "CalculatorResults", "visible": True, "enabled": True},
@@ -168,12 +170,19 @@ class SelfTestTests(unittest.TestCase):
              patch("app_agent.self_test.foreground_window", return_value=41), \
              patch("app_agent.self_test.doctor", return_value={"visible_windows": 1, "dependencies": {"pywinauto": True}}), \
              patch("app_agent.self_test.scan_apps", return_value=inventory_snapshot([app()])), \
-             patch("app_agent.self_test.calculator_smoke", return_value={"passed": 3}), \
+             patch("app_agent.self_test.calculator_smoke", return_value={"passed": 3, "window_handle": 41, "process_id": 81}), \
              patch.object(NotepadFixture, "open", open_fixture), \
              patch("app_agent.self_test.WindowsDesktop") as windows:
-            windows.windows.return_value = [(41, "Calculator")]
+            # Other Calculator windows must not affect the established fixture.
+            windows.windows.return_value = [(41, "Calculator"), (42, "Calculator")]
             windows.return_value = calculator
             report = self_test(directory, cloud=Cloud(), emit=lambda text: None)
+            if changed_process:
+                self.assertEqual(report["status"], "failed")
+                self.assertEqual(report["counts"]["failed"], 1)
+                self.assertIn("changed identity", report["checks"][-1]["error"])
+                self.assertEqual(calculator.value, "6")
+                return
             self.assertEqual(report["status"], "passed", json.dumps(report["checks"], indent=2))
             self.assertEqual(report["counts"]["passed"], 12)
             self.assertEqual(json.loads(Path(report["report_path"]).read_text(encoding="utf-8")), report)
@@ -181,6 +190,11 @@ class SelfTestTests(unittest.TestCase):
             records = [json.loads(line) for line in sessions.read_text(encoding="utf-8").splitlines()]
             self.assertEqual(len(records), 3)
             self.assertTrue(all(r["actions_executed"] == 1 and r["outcome"] == "result_observed" for r in records))
+            windows.assert_called_once_with(41)
+            windows.windows.assert_not_called()
+
+    def test_calculator_reused_handle_with_different_process_is_rejected(self):
+        self.test_entire_suite_runs_tasks_and_verifies_report_with_simulated_windows(changed_process=True)
 
     def test_entire_simulated_suite_with_windows_newline_translation(self):
         original = Path.write_text

@@ -89,3 +89,7 @@ The simulated Notepad save now writes literal line endings instead of asking Pyt
 ### Windows report fixes (0.4.3)
 
 The received live Windows report showed 9 passed and 3 failed checks: inventory, native Notepad editing, and both AI Notepad edits passed; Calculator native detection, Notepad save, and AI Calculator verification failed. The save check now calls the pointer-sized user32 GetForegroundWindow API directly. UIA pattern-availability probes use the correct 300xx property identifiers. The Calculator sandbox permits accessible clicks on the same arithmetic-only control allowlist. Native calculations no longer require clearButton: a focus-checked Escape clears Calculator when that ID is absent. AI calculation failures now include outcome, action count, display text and last step, with full session evidence retained. The API-key-present flag accounts for a key entered directly into the CLI client. All 90 cloud regression tests pass; the revised live Windows checks remain to be run.
+
+### Reuse the tested Calculator window (0.4.4)
+
+The latest received Windows report has 11 passed checks and one failure: AI Calculator selection was ambiguous with multiple Calculator windows. The native check now returns the window handle and process ID. The AI check reuses that exact fixture instead of scanning for a unique Calculator. A closed window or changed process is rejected without switching to another app. All 91 regression tests pass, including multiple-window and changed-process checks. Live confirmation of this final fix remains pending.

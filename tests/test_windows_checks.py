@@ -7,6 +7,7 @@ class CalculatorChecksTests(unittest.TestCase):
     def calculator(self):
         desktop = Mock()
         desktop.window.handle = 41
+        desktop.window.process_id.return_value = 81
         identities = [*[f"num{i}Button" for i in range(10)], "plusButton", "minusButton", "divideButton", "equalButton"]
         state = {"value": "0", "left": None, "operator": None, "new": True}
         def observe():
@@ -46,6 +47,7 @@ class CalculatorChecksTests(unittest.TestCase):
             adapter.return_value = desktop
             result = calculator_smoke(cancel)
         self.assertEqual(result["passed"], 3)
+        self.assertEqual((result["window_handle"], result["process_id"]), (41, 81))
         self.assertEqual([c["expected"] for c in result["checks"]], ["42", "4", "6"])
         self.assertEqual(desktop.window.type_keys.call_count, 3)
         self.assertTrue(all(call.args[0]["kind"] == "click" for call in desktop.act.call_args_list))

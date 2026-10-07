@@ -86,4 +86,6 @@ def calculator_smoke(cancel=None):
         if not numbers or numbers[-1] != expected:
             raise RuntimeError(f"Calculator result mismatch: expected {expected}, observed {result!r}")
         checks.append({"expected": expected, "observed": result, "passed": True})
-    return {"checks": checks, "passed": len(checks), "note": "Calculator remains open; its current calculation was changed."}
+    return {"checks": checks, "passed": len(checks),
+            "window_handle": desktop.window.handle, "process_id": desktop.window.process_id(),
+            "note": "Calculator remains open; its current calculation was changed."}

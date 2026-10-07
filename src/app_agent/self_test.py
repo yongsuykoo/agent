@@ -149,6 +149,12 @@ def self_test(data_dir, cloud=None, emit=print, cancel=None):
     run_dir = Path(data_dir) / "self-tests" / (datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8])
     run_dir.mkdir(parents=True)
     fixture = NotepadFixture(run_dir, cancel)
+    calculator_fixture = {}
+
+    def native_calculator():
+        details = calculator_smoke(cancel)
+        calculator_fixture.update(window_handle=details["window_handle"], process_id=details["process_id"])
+        return details
 
     def inventory():
         snapshot = scan_apps()
@@ -183,20 +189,14 @@ def self_test(data_dir, cloud=None, emit=print, cancel=None):
     def model_calculator():
         if cloud is None:
             raise SkipCheck("Cloud reasoning not requested or no API key available.")
-        matches = []
-        for handle, title in WindowsDesktop.windows():
-            try:
-                desktop = WindowsDesktop(handle)
-                observation = desktop.observe()
-            except Exception:
-                # An unrelated app may close or deny accessibility enumeration.
-                continue
-            if {"CalculatorResults", "num2Button", "equalButton"} <= {c["automation_id"] for c in observation["controls"]}:
-                matches.append(desktop)
-        if len(matches) != 1:
-            raise RuntimeError("Expected one standard Calculator window; ambiguous targets are not automated.")
-        desktop = matches[0]
-        identity = (desktop.window.handle, desktop.window.process_id())
+        if not calculator_fixture:
+            raise SkipCheck("The native Calculator check did not establish a test window; no other window is selected.")
+        identity = (calculator_fixture["window_handle"], calculator_fixture["process_id"])
+        desktop = WindowsDesktop(identity[0])
+        observation = desktop.observe()
+        if (observation.get("window_handle"), observation.get("process_id")) != identity or not {
+                "CalculatorResults", "num2Button", "equalButton"} <= {c["automation_id"] for c in observation["controls"]}:
+            raise RuntimeError("The tested Calculator window closed or changed identity; no other window is selected.")
         def approve(action, snapshot):
             return not cancel.is_set() and (snapshot["window_handle"], snapshot["process_id"]) == identity and calculator_action(action, snapshot)
         result = TaskRunner(desktop, cloud, approve, emit, run_dir, cancel).run(
@@ -209,7 +209,7 @@ def self_test(data_dir, cloud=None, emit=print, cancel=None):
         return {"outcome": result["outcome"], "actions_executed": result["actions_executed"], "display": display}
 
     checks = [("runtime prerequisites", prerequisites), ("installed-app inventory", inventory),
-              ("Calculator three native calculations", lambda: calculator_smoke(cancel)), ("open disposable Notepad", fixture.open),
+              ("Calculator three native calculations", native_calculator), ("open disposable Notepad", fixture.open),
               ("Notepad native text entry", lambda: fixture.replace("Hello from my personal agent")),
               ("Notepad exact replacement", lambda: fixture.replace("My agent can operate Notepad.")),
               ("Notepad literal punctuation and Unicode", lambda: fixture.replace("Literal + ^ % {braces} (text) — 你好")),
