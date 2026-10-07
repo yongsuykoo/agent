@@ -15,13 +15,24 @@ class WindowsDesktop:
         if sys.platform != "win32":
             raise RuntimeError("Window discovery requires Windows.")
         from pywinauto import Desktop
-        return [(window.handle, window.window_text()) for window in Desktop(backend="uia").windows()
-                if window.is_visible() and window.window_text()]
+        found = []
+        for window in Desktop(backend="uia").windows():
+            try:
+                title = window.window_text()
+                if window.is_visible() and title:
+                    found.append((window.handle, title))
+            except Exception:
+                # Windows can close or become inaccessible during enumeration.
+                continue
+        return found
 
     def observe(self):
         if not self.window.is_visible():
             raise RuntimeError("Selected window is no longer visible.")
-        self.controls = [self.window] + self.window.descendants()[:250]
+        try:
+            self.controls = [self.window] + self.window.descendants()[:250]
+        except Exception as error:
+            raise RuntimeError("Could not read the selected app's accessibility controls. Close and reopen the app, refresh windows, and select it again.") from error
         result = []
         for index, control in enumerate(self.controls):
             try:

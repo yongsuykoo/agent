@@ -12,6 +12,7 @@ from .research import CloudResearcher, output_text, research_app, validate_api_k
 from .runner import TaskRunner
 from .voice import Recorder, transcribe
 from .hotkey import register_stop
+from .automation_worker import AutomationWorker
 
 
 def launch(data_dir):
@@ -64,13 +65,12 @@ def launch(data_dir):
     def refresh():
         if state["busy"]:
             return
-        try:
-            state["windows"] = [(handle, title) for handle, title in WindowsDesktop.windows() if not title.startswith("App Agent —")]
-            windows["values"] = [title for handle, title in state["windows"]]
-            if state["windows"]:
-                windows.current(0)
-        except Exception as error:
-            append(error)
+        state["busy"] = True
+        status.set("Refreshing app windows")
+        def work():
+            found = [(handle, title) for handle, title in WindowsDesktop.windows() if not title.startswith("App Agent —")]
+            events.put(("windows", found))
+        automation.submit(work)
 
     def resolve_approval(allowed):
         pending = state["approval"]
@@ -106,14 +106,11 @@ def launch(data_dir):
         return pending["allowed"] and not cancel.is_set()
 
     def worker(function):
-        import pythoncom
-        pythoncom.CoInitialize()
         try:
             function()
         except Exception as error:
             events.put(("log", f"Error: {error}"))
         finally:
-            pythoncom.CoUninitialize()
             events.put(("done", None))
 
     def start(mode):
@@ -171,7 +168,7 @@ def launch(data_dir):
                 finally:
                     store.close()
                 TaskRunner(WindowsDesktop(handle), CloudResearcher(), approve, emit, data_dir, cancel).run(task, blueprint)
-        threading.Thread(target=worker, args=(work,), daemon=True).start()
+        automation.submit(work)
 
     def microphone():
         if state["busy"]:
@@ -199,7 +196,7 @@ def launch(data_dir):
                     text = transcribe(audio)
                     if not cancel.is_set():
                         events.put(("transcript", text))
-                threading.Thread(target=worker, args=(work,), daemon=True).start()
+                automation.submit(work)
         except Exception as error:
             if recorder.stream:
                 recorder.stream.stop()
@@ -216,6 +213,7 @@ def launch(data_dir):
             recorder.stream.close()
         state["closing"] = True
         hotkey_stop.set()
+        automation.close()
         root.destroy()
 
     def pump():
@@ -228,6 +226,15 @@ def launch(data_dir):
                 append(payload)
             elif kind == "stop":
                 stop()
+            elif kind == "windows":
+                selected = windows.get()
+                state["windows"] = payload
+                titles = [title for handle, title in payload]
+                windows["values"] = titles
+                if titles:
+                    windows.current(titles.index(selected) if selected in titles else 0)
+                else:
+                    windows.set("")
             elif kind == "done":
                 state["busy"] = False
                 resolve_approval(False)
@@ -263,6 +270,10 @@ def launch(data_dir):
     reject_button.pack(side="left", padx=5)
     root.bind("<Escape>", lambda event: stop())
     root.protocol("WM_DELETE_WINDOW", close)
+    def initialization_error(error):
+        events.put(("log", f"Windows automation worker failed: {error}"))
+        events.put(("done", None))
+    automation = AutomationWorker(worker, initialization_error)
     refresh()
     pump()
     try:
