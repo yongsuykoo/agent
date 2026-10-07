@@ -15,6 +15,22 @@ EXTRACTION = {"capabilities": [{"name": "Add", "steps": ["Press plus"],
 
 
 class ResearchTests(unittest.TestCase):
+    def test_deeper_search_excludes_already_studied_citations(self):
+        researcher = CloudResearcher(key="test")
+        response = {"output": [{"content": [{"annotations": [
+            {"type": "url_citation", "url": "https://example.com/old"},
+            {"type": "url_citation", "url": "https://example.com/technical"}]}]}]}
+        with patch.object(researcher, "request", return_value=response) as request:
+            urls = researcher.find_sources("Editor", "1", focus={"known_gaps": ["API"]}, exclude_urls=["https://example.com/old"])
+        self.assertEqual(urls, ["https://example.com/technical"])
+        self.assertIn("API", request.call_args.kwargs["input"])
+
+    def test_duplicate_capability_names_are_rejected(self):
+        duplicate = json.loads(json.dumps(EXTRACTION))
+        duplicate["capabilities"].append({**duplicate["capabilities"][0], "name": "add"})
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            validate_extraction(duplicate, [DOCUMENT])
+
     def test_search_extract_and_persist_pipeline(self):
         class FakeResearcher(CloudResearcher):
             def request(self, **payload):

@@ -14,11 +14,14 @@ from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 
 from .desktop import WindowsDesktop, foreground_window
-from .runner import TaskRunner
+from .runner import TaskRunner, exact_text_goal
 from .practice_policy import calculator_action
 from .windows_checks import calculator_smoke, doctor
 from .discovery import scan_apps
 from .catalog import Catalog
+from .learning import ensure_blueprint, practice_task
+from .campaign import practice_one
+from .app_practice import create_grant, grants_action
 
 
 class SkipCheck(RuntimeError):
@@ -150,6 +153,49 @@ class NotepadFixture:
         return {"file": str(self.path), "disk_text_matches_editor": True}
 
 
+def learning_experiment(fixture, cloud, run_dir, cancel, emit):
+    """Research and practice from scratch using only the disposable editor."""
+    if cloud is None:
+        raise SkipCheck("Cloud reasoning not requested or no API key available.")
+    fixture.observe()
+    catalog = Catalog(Path(run_dir) / "learning-test")
+    try:
+        # This isolated identity is a test fixture, not a discovered app version.
+        # Unknown version applicability must remain a documentation limitation.
+        app = {"id": "fixture:notepad", "name": "Microsoft Windows Notepad", "version": "",
+               "source": "self-test", "app_id": None}
+        catalog.sync({"apps": [app], "complete_sources": ["self-test"]})
+        current = catalog.get(app["id"])
+        blueprint = ensure_blueprint(catalog, current, cloud, emit, cancel)
+        plan = practice_task(blueprint, cloud, experiment_context={
+            "workspace": "A new disposable Notepad test document",
+            "permitted_actions": ["Replace document text using the existing editable control"],
+            "required_task_form": "Replace the document text with exactly: <your own short test text>",
+            "verification": "expected_result must be exactly your chosen document text; choose a documented text-entry operation",
+            "forbidden_actions": ["Save", "Open another document", "Invoke menus", "Change settings"]})
+        if cancel.is_set():
+            raise RuntimeError("Self-test stopped.")
+        if exact_text_goal(plan["task"]) != plan["expected_result"]:
+            raise RuntimeError("Generated experiment must request exact editor text matching its expected result; no experiment executed.")
+        # A pre-existing result cannot satisfy the experiment accidentally.
+        fixture.replace("")
+        current = catalog.get(app["id"])
+        grant = create_grant(current, fixture.observe(), [editor(fixture.observe())["id"]])
+        if not catalog.save_practice_plan(app["id"], current["generation"], plan):
+            raise RuntimeError("Generated experiment could not be queued.")
+        result = practice_one(catalog, current, cloud, fixture.desktop,
+            lambda action, observation: fixture.approve(action, observation) and grants_action(grant, action, observation),
+            emit, run_dir, cancel, max_steps=12)
+        if (result["status"] != "experiment_observed" or result["outcome"] != "result_observed"
+                or result["actions_executed"] < 1 or editor(fixture.observe()).get("value") != plan["expected_result"]):
+            raise RuntimeError("Autonomous learning experiment failed: " + json.dumps(result))
+        return {**result, "generated_task": plan["task"], "exact_match": True,
+                "documentation_sources": [source["url"] for source in blueprint.get("sources", [])],
+                "documented_capabilities": len(blueprint["capabilities"]), "overview": catalog.learning_overview()}
+    finally:
+        catalog.close()
+
+
 def self_test(data_dir, cloud=None, emit=print, cancel=None):
     if sys.platform != "win32":
         raise RuntimeError("Live self-test needs an interactive Windows computer; cloud Linux cannot control your PC.")
@@ -226,7 +272,8 @@ def self_test(data_dir, cloud=None, emit=print, cancel=None):
               ("Notepad save and disk verification", fixture.save),
               ("AI Notepad text replacement", lambda: model_text("The agent ran its own Windows test.")),
               ("AI Notepad second distinct task", lambda: model_text("Autonomous replacement verified.")),
-              ("AI Calculator task", model_calculator)]
+              ("AI Calculator task", model_calculator),
+              ("AI documentation-to-practice learning", lambda: learning_experiment(fixture, cloud, run_dir, cancel, emit))]
     emit("Self-test uses a new disposable Notepad file and clears Calculator. Please leave the desktop untouched until it finishes. STOP cancels remaining checks.")
     report = run_checks(checks, run_dir / "report.json", cancel, emit)
     emit("Self-test complete. The disposable Notepad file and session evidence remain in " + str(run_dir))

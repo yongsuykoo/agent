@@ -24,6 +24,11 @@ def main():
     commands.add_parser("apps", help="List discovered apps and documentation status")
     study = commands.add_parser("study-next", help="Research one queued app within the daily background budget")
     study.add_argument("--daily-limit", type=int, default=3, choices=range(1, 51))
+    campaign = commands.add_parser("study-campaign", help="Study queued apps and design capability experiments; no desktop mutations")
+    campaign.add_argument("--daily-limit", type=int, default=50, choices=range(1, 51))
+    campaign.add_argument("--max-apps", type=int, default=5, choices=range(1, 51))
+    campaign.add_argument("--max-plans", type=int, default=3, choices=range(0, 51))
+    commands.add_parser("learning-report", help="Show current evidence counts and campaign progress")
     blueprint = commands.add_parser("blueprint", help="Create or inspect an app knowledge record")
     blueprint.add_argument("name")
     blueprint.add_argument("--create", action="store_true")
@@ -66,13 +71,20 @@ def main():
         elif args.command in ("doctor", "windows-smoke"):
             from .windows_checks import doctor, calculator_smoke
             result = doctor() if args.command == "doctor" else calculator_smoke()
-        elif args.command in ("scan", "apps", "study-next"):
+        elif args.command in ("scan", "apps", "study-next", "study-campaign", "learning-report"):
             catalog = Catalog(args.data_dir)
             try:
                 if args.command == "scan":
                     result = catalog.sync(scan_apps())
                 elif args.command == "apps":
                     result = [{key: value for key, value in app.items() if key not in ("blueprint", "location")} for app in catalog.apps()]
+                elif args.command == "learning-report":
+                    result = {"overview": catalog.learning_overview(), "campaign": catalog.setting("campaign_state", {})}
+                elif args.command == "study-campaign":
+                    from .campaign import study_campaign
+                    if os.name == "nt":
+                        catalog.sync(scan_apps())
+                    result = study_campaign(catalog, CloudResearcher(), lambda text: print(text), args.daily_limit, args.max_apps, args.max_plans)
                 else:
                     result = learn_next(catalog, CloudResearcher(), lambda text: print(text), args.daily_limit)
             finally:

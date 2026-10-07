@@ -17,14 +17,21 @@ from .automation_worker import AutomationWorker
 from .catalog import Catalog
 from .discovery import scan_apps
 from .learning import ensure_blueprint, learn_next, practice_task
+from .campaign import study_campaign, practice_one
 from .routing import choose_app, launch_app, window_matches
 from .practice_policy import calculator_app, calculator_action
-from .app_practice import create_grant, grants_action, consume_practice_budget
+from .app_practice import create_grant, grants_action
+
+
+def launch_research(function):
+    thread = threading.Thread(target=function, daemon=True, name="app-agent-documentation")
+    thread.start()
+    return thread
 
 
 def launch(data_dir):
     root = tk.Tk()
-    root.title("App Agent — 0.4.6 Windows learning release")
+    root.title("App Agent — 0.5.0 Windows learning release")
     root.geometry("980x820")
     if not (os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")):
         key = simpledialog.askstring("Cloud AI setup", "OpenAI API key (kept in memory for this session).\nLeave blank to inspect windows without AI.", show="*", parent=root)
@@ -35,8 +42,9 @@ def launch(data_dir):
                 messagebox.showerror("Invalid API key", str(error), parent=root)
     events = queue.Queue()
     cancel = threading.Event()
+    research_cancel = threading.Event()
     task_permission = threading.Event()
-    state = {"busy": False, "recording": False, "approval": None, "windows": [], "closing": False, "voice_timer": None, "last_scan": 0, "last_learning": 0, "learning_paused": False, "background_status": None}
+    state = {"busy": False, "recording": False, "approval": None, "windows": [], "closing": False, "voice_timer": None, "last_scan": 0, "last_learning": 0, "learning_paused": False, "background_status": None, "research_busy": False, "practice_pending": False}
     recorder = Recorder()
     hotkey_stop = register_stop(lambda: (cancel.set(), events.put(("stop", None))), lambda text: events.put(("log", text)))
     frame = ttk.Frame(root, padding=12)
@@ -93,7 +101,11 @@ def launch(data_dir):
 
     def catalog_summary(catalog):
         apps = catalog.apps()
-        events.put(("inventory", f"{len(apps)} apps detected; {sum(bool(app['blueprint']) for app in apps)} documented. Monitoring every 5 minutes while open. Background study: up to {catalog.setting('daily_limit', 3)} apps/day."))
+        progress = catalog.learning_overview()
+        events.put(("inventory", f"{len(apps)} apps detected; {progress['apps_documented']} documented; "
+                    f"{progress['capabilities_tested_once']}/{progress['documented_capabilities']} capabilities have observed tests; "
+                    f"{progress['experiments_ready']} experiments ready. Monitoring every 5 minutes while open. "
+                    f"Study budget: {catalog.setting('daily_limit', 3)} apps/day."))
 
     def scan_inventory():
         if state["busy"] or state["recording"]:
@@ -128,6 +140,26 @@ def launch(data_dir):
             append("Background documentation study enabled." if auto_learn.get() else "Background study paused; installation monitoring continues.")
         except (ValueError, tk.TclError) as error:
             append(error)
+
+    def start_campaign():
+        if state["busy"] or state["recording"]:
+            return
+        if not (os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")):
+            append("Learning campaign needs the API key entered when starting the agent.")
+            return
+        # This button explicitly enables the broad study campaign. Its visible
+        # budget remains editable; existing app-control grants are preserved.
+        learning_limit.set(50)
+        auto_learn.set(True)
+        learning_settings()
+        catalog = Catalog(data_dir)
+        try:
+            catalog.set_setting("study_campaign", True)
+            catalog.set_setting("campaign_state", {})
+        finally:
+            catalog.close()
+        state["last_learning"] = 0
+        append("Learning campaign enabled: up to 50 app studies and 50 experiment designs per day, using cloud API calls. STOP pauses it. Unattended actions use existing practice permissions only.")
 
     def practice_settings():
         if auto_practice.get() and not messagebox.askokcancel("Calculator practice permission", "Allow the agent to open Windows Calculator, clear its current calculation, and independently test arithmetic using only its number/operator buttons? It will not interact with other apps. Practice sends Calculator control text to OpenAI and uses API calls."):
@@ -175,9 +207,11 @@ def launch(data_dir):
             try:
                 evidence = catalog.workflows(app["id"], app["generation"])
                 coverage = catalog.coverage(app["id"], app["generation"])
+                experiments = [catalog.practice_plan(app["id"], app["generation"], cap["name"]) for cap in coverage]
             finally:
                 catalog.close()
-            details.insert("1.0", json.dumps({"name": app["name"], "version": app.get("version"), "status": app["status"], "capability_coverage": coverage, "tested_workflows": evidence, "blueprint": app["blueprint"], "error": app["error"]}, indent=2))
+            details.insert("1.0", json.dumps({"name": app["name"], "version": app.get("version"), "status": app["status"], "capability_coverage": coverage,
+                "experiments": [plan for plan in experiments if plan], "tested_workflows": evidence, "blueprint": app["blueprint"], "error": app["error"]}, indent=2))
         tree.bind("<<TreeviewSelect>>", selected)
         def request_grant():
             selection = tree.selection()
@@ -235,6 +269,8 @@ def launch(data_dir):
 
     def stop():
         cancel.set()
+        research_cancel.set()
+        state["practice_pending"] = False
         task_permission.clear()
         practice_grants.clear()
         state["learning_paused"] = True
@@ -381,19 +417,46 @@ def launch(data_dir):
                     finally:
                         catalog.close()
                     if mode == "practice":
-                        plan = practice_task(blueprint, CloudResearcher(), previous)
+                        catalog = Catalog(data_dir)
+                        try:
+                            plan = catalog.ready_practice_plan(app["id"], app["generation"])
+                            capability = catalog.next_practice_capability(app["id"], app["generation"])
+                        finally:
+                            catalog.close()
+                        if plan is None and capability is None:
+                            emit("Documented capabilities already have sufficient observed runs or are waiting for retry. Review Apps & knowledge for remaining gaps.")
+                            return
+                        if plan is None:
+                            plan = practice_task(blueprint, CloudResearcher(), previous, capability_name=capability)
+                            if cancel.is_set():
+                                return
+                            catalog = Catalog(data_dir)
+                            try:
+                                if not catalog.save_practice_plan(app["id"], app["generation"], plan):
+                                    emit("App changed or experiment already running; practice deferred.")
+                                    return
+                            finally:
+                                catalog.close()
+                        catalog = Catalog(data_dir)
+                        try:
+                            if not catalog.claim_practice_plan(app["id"], app["generation"], plan["capability_name"]):
+                                emit("App changed or experiment already running; practice deferred.")
+                                return
+                        finally:
+                            catalog.close()
                         actual_task = plan["task"]
                         emit("Self-generated practice task: " + actual_task)
                     if cancel.is_set():
                         return
-                    record = TaskRunner(WindowsDesktop(selected_handle), CloudResearcher(), approve, emit, data_dir, cancel).run(actual_task, blueprint, previous_workflows=previous, use_vision=use_vision)
+                    record = TaskRunner(WindowsDesktop(selected_handle), CloudResearcher(), approve, emit, data_dir, cancel).run(actual_task, blueprint, previous_workflows=previous, use_vision=use_vision,
+                        required_result_text=plan["expected_result"] if mode == "practice" else None)
                     if mode == "practice":
                         record["capability_name"] = plan["capability_name"]
                     catalog = Catalog(data_dir)
                     try:
-                        if mode == "practice":
-                            catalog.record_practice(app["id"], app["generation"], record)
-                        if catalog.save_workflow(app["id"], app["generation"], record):
+                        saved = (catalog.finish_practice_plan(app["id"], app["generation"], record) if mode == "practice" else
+                                 catalog.save_workflow(app["id"], app["generation"], record))
+                        if saved:
                             emit("Learned workflow stored with app version and execution evidence; future tasks can reuse it.")
                         observed = next((entry["verification"] for entry in reversed(record["history"]) if "verification" in entry), None)
                         if observed:
@@ -473,6 +536,12 @@ def launch(data_dir):
                 append(payload)
             elif kind == "stop":
                 stop()
+            elif kind == "study_complete":
+                state["research_busy"] = False
+                if state["background_status"] != payload["status"] or payload["status"] in ("documented", "research_failed", "progress"):
+                    append("Background study: " + payload["status"])
+                state["background_status"] = payload["status"]
+                state["practice_pending"] = not state["learning_paused"] and not research_cancel.is_set()
             elif kind == "windows":
                 selected = windows.get()
                 state["windows"] = payload
@@ -515,6 +584,7 @@ def launch(data_dir):
     ttk.Button(toolbar, text="Apps & knowledge", command=show_apps).pack(side="left", padx=5)
     ttk.Button(toolbar, text="Open Calculator", command=lambda: subprocess.Popen(["calc.exe"])).pack(side="left", padx=5)
     ttk.Button(toolbar, text="Self-test", command=start_self_test).pack(side="left", padx=5)
+    ttk.Button(toolbar, text="Learn all apps", command=start_campaign).pack(side="left", padx=5)
     ttk.Checkbutton(learning_bar, text="Automatically study discovered/new apps", variable=auto_learn, command=learning_settings).pack(side="left")
     ttk.Label(learning_bar, text="Daily app limit:").pack(side="left", padx=5)
     ttk.Spinbox(learning_bar, from_=1, to=50, textvariable=learning_limit, width=4, command=learning_settings).pack(side="left")
@@ -538,13 +608,104 @@ def launch(data_dir):
         events.put(("log", f"Windows automation worker failed: {error}"))
         events.put(("done", None))
     automation = AutomationWorker(worker, initialization_error)
+    def background_practice():
+        if state["busy"] or state["recording"] or state["learning_paused"]:
+            return
+        state["practice_pending"] = False
+        try:
+            daily_limit = learning_limit.get()
+            if not 1 <= daily_limit <= 50:
+                raise ValueError("Daily study limit must be between 1 and 50.")
+        except (ValueError, tk.TclError) as error:
+            append(error)
+            return
+        state["busy"] = True
+        cancel.clear()
+        permit_calculator = auto_practice.get()
+        def work():
+            catalog = Catalog(data_dir)
+            try:
+                # Observe running apps without clicking; never open arbitrary
+                # apps merely to inspect them in background.
+                open_windows = WindowsDesktop.windows()
+                observed_count = 0
+                for known in catalog.apps():
+                    if cancel.is_set() or observed_count >= 5:
+                        break
+                    if not known["blueprint"] or catalog.interface(known["id"], known["generation"]):
+                        continue
+                    matches = window_matches(known, open_windows)
+                    if len(matches) == 1:
+                        observed_count += 1
+                        try:
+                            catalog.save_interface(known["id"], known["generation"], WindowsDesktop(matches[0][0]).observe())
+                        except Exception as error:
+                            events.put(("log", f"Interface inspection deferred for {known['name']}: {error}"))
+                if permit_calculator and not cancel.is_set():
+                    candidates = [known for known in catalog.apps() if calculator_app(known) and known["blueprint"]
+                                  and (catalog.ready_practice_plan(known["id"], known["generation"]) or catalog.next_practice_capability(known["id"], known["generation"]))]
+                    if candidates:
+                        known = candidates[0]
+                        matches = window_matches(known, open_windows)
+                        if not matches:
+                            launch_app(known)
+                            deadline = time.monotonic() + 30
+                            while time.monotonic() < deadline and not cancel.is_set():
+                                matches = window_matches(known, WindowsDesktop.windows())
+                                if matches:
+                                    break
+                                cancel.wait(0.5)
+                        chosen = None
+                        for handle, title in matches:
+                            try:
+                                desktop = WindowsDesktop(handle)
+                                snapshot = desktop.observe()
+                                if {"CalculatorResults", "num2Button", "equalButton"} <= {c["automation_id"] for c in snapshot["controls"]}:
+                                    chosen = (desktop, snapshot)
+                                    break
+                            except Exception:
+                                continue
+                        if chosen and not cancel.is_set():
+                            desktop, snapshot = chosen
+                            identity = (snapshot["window_handle"], snapshot["process_id"])
+                            def approve_calculator(action, observation):
+                                return (observation.get("window_handle"), observation.get("process_id")) == identity and calculator_action(action, observation)
+                            result = practice_one(catalog, known, CloudResearcher(), desktop, approve_calculator,
+                                lambda text: events.put(("log", text)), data_dir, cancel, daily_limit=daily_limit)
+                            events.put(("log", "Calculator capability practice: " + result["status"]))
+                # Generic practice is scoped to explicit session grants;
+                # no arbitrary app is opened or granted controls by a model.
+                for identity, grant in list(practice_grants.items()):
+                    if cancel.is_set():
+                        break
+                    try:
+                        known = catalog.get(identity)
+                    except KeyError:
+                        continue
+                    if known["generation"] != grant["generation"] or not known["blueprint"]:
+                        continue
+                    try:
+                        result = practice_one(catalog, known, CloudResearcher(), WindowsDesktop(grant["window_handle"]),
+                            lambda action, observation: grants_action(grant, action, observation),
+                            lambda text: events.put(("log", text)), data_dir, cancel, daily_limit=daily_limit)
+                        if result["status"] not in ("no_ready_capability", "practice_daily_limit", "planning_daily_limit"):
+                            events.put(("log", f"Practice in {known['name']}: {result['status']}"))
+                    except Exception as error:
+                        events.put(("log", f"Practice deferred for {known['name']}: {error}"))
+                catalog_summary(catalog)
+            finally:
+                catalog.close()
+        automation.submit(work)
+
     def maintenance():
         if state["closing"]:
             return
         if not state["busy"] and not state["recording"]:
             if time.monotonic() - state["last_scan"] > 300:
                 scan_inventory()
-            elif auto_learn.get() and not state["learning_paused"] and time.monotonic() - state["last_learning"] > 60 and (os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")):
+            elif state["practice_pending"] and not state["learning_paused"]:
+                background_practice()
+            elif auto_learn.get() and not state["learning_paused"] and not state["research_busy"] and time.monotonic() - state["last_learning"] > 60 and (os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")):
                 try:
                     daily_limit = learning_limit.get()
                     if not 1 <= daily_limit <= 50:
@@ -554,83 +715,25 @@ def launch(data_dir):
                     root.after(5000, maintenance)
                     return
                 state["last_learning"] = time.monotonic()
-                state["busy"] = True
-                cancel.clear()
-                status.set("Background study: researching a queued app")
-                permit_calculator = auto_practice.get()
+                state["research_busy"] = True
+                research_cancel.clear()
+                status.set("Studying documentation in background; chat tasks remain available.")
                 def study():
-                    catalog = Catalog(data_dir)
+                    catalog = None
                     try:
-                        result = learn_next(catalog, CloudResearcher(), lambda text: events.put(("log", text)), daily_limit, cancel)
-                        if state["background_status"] != result["status"] or result["status"] in ("documented", "research_failed"):
-                            events.put(("log", "Background study: " + result["status"]))
-                        state["background_status"] = result["status"]
-                        # Observe running apps without clicking; never open arbitrary
-                        # apps merely to inspect them in background.
-                        open_windows = WindowsDesktop.windows()
-                        observed_count = 0
-                        for known in catalog.apps():
-                            if cancel.is_set() or observed_count >= 5:
-                                break
-                            if not known["blueprint"] or catalog.interface(known["id"], known["generation"]):
-                                continue
-                            matches = window_matches(known, open_windows)
-                            if len(matches) == 1:
-                                observed_count += 1
-                                try:
-                                    catalog.save_interface(known["id"], known["generation"], WindowsDesktop(matches[0][0]).observe())
-                                except Exception as error:
-                                    events.put(("log", f"Interface inspection deferred for {known['name']}: {error}"))
-                        if permit_calculator and not cancel.is_set():
-                            practice_day = time.strftime("%Y-%m-%d", time.localtime())
-                            candidates = [known for known in catalog.apps() if calculator_app(known) and known["blueprint"] and not catalog.workflows(known["id"], known["generation"]) and catalog.setting(f"practice:{known['id']}:{known['generation']}") != practice_day]
-                            if candidates:
-                                known = candidates[0]
-                                catalog.set_setting(f"practice:{known['id']}:{known['generation']}", practice_day)
-                                matches = window_matches(known, open_windows)
-                                if not matches:
-                                    launch_app(known)
-                                    deadline = time.monotonic() + 20
-                                    while time.monotonic() < deadline and not cancel.is_set():
-                                        matches = window_matches(known, WindowsDesktop.windows())
-                                        if matches:
-                                            break
-                                        cancel.wait(0.5)
-                                if len(matches) == 1 and not cancel.is_set() and consume_practice_budget(catalog):
-                                    emit = lambda text: events.put(("log", text))
-                                    plan = practice_task(known["blueprint"], CloudResearcher(), catalog.workflows(known["id"], known["generation"]))
-                                    emit("Autonomous Calculator experiment: " + plan["task"])
-                                    record = TaskRunner(WindowsDesktop(matches[0][0]), CloudResearcher(), calculator_action, emit, data_dir, cancel).run("Clear the current calculation first. " + plan["task"], known["blueprint"])
-                                    record["capability_name"] = plan["capability_name"]
-                                    catalog.record_practice(known["id"], known["generation"], record)
-                                    catalog.save_workflow(known["id"], known["generation"], record)
-                        # Generic practice is scoped to explicit session grants;
-                        # no arbitrary app is opened or granted controls by a model.
-                        for identity, grant in list(practice_grants.items()):
-                            if cancel.is_set():
-                                break
-                            try:
-                                known = catalog.get(identity)
-                            except KeyError:
-                                continue
-                            if known["generation"] != grant["generation"] or not known["blueprint"]:
-                                continue
-                            day = time.strftime("%Y-%m-%d", time.localtime())
-                            key = f"practice:{identity}:{known['generation']}"
-                            if catalog.setting(key) == day or not consume_practice_budget(catalog):
-                                continue
-                            catalog.set_setting(key, day)
-                            emit = lambda text: events.put(("log", text))
-                            plan = practice_task(known["blueprint"], CloudResearcher(), catalog.workflows(identity, known["generation"]))
-                            emit(f"Independent practice in {known['name']}: {plan['task']}")
-                            record = TaskRunner(WindowsDesktop(grant["window_handle"]), CloudResearcher(), lambda action, observation: grants_action(grant, action, observation), emit, data_dir, cancel).run(plan["task"], known["blueprint"], max_steps=12)
-                            record["capability_name"] = plan["capability_name"]
-                            catalog.record_practice(identity, known["generation"], record)
-                            catalog.save_workflow(identity, known["generation"], record)
+                        catalog = Catalog(data_dir)
+                        result = (study_campaign(catalog, CloudResearcher(), lambda text: events.put(("log", text)), daily_limit=daily_limit, cancel=research_cancel)
+                                  if catalog.setting("study_campaign", False) else
+                                  learn_next(catalog, CloudResearcher(), lambda text: events.put(("log", text)), daily_limit, research_cancel))
                         catalog_summary(catalog)
+                        events.put(("study_complete", result))
+                    except Exception as error:
+                        events.put(("log", f"Background research failed: {error}"))
+                        events.put(("study_complete", {"status": "research_failed"}))
                     finally:
-                        catalog.close()
-                automation.submit(study)
+                        if catalog is not None:
+                            catalog.close()
+                launch_research(study)
         root.after(5000, maintenance)
     refresh()
     root.after(1000, maintenance)

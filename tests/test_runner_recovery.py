@@ -22,6 +22,11 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "numeric indexes alone"):
             validate_action({"kind": "invoke", "target": 1, "reason": "Press"}, observation(), require_identity=True)
 
+    def test_approval_is_invalidated_when_window_handle_is_reused_by_another_process(self):
+        before = {**observation(), "window_handle": 41, "process_id": 81}
+        after = {**before, "process_id": 82}
+        self.assertIsNone(reconcile_action({"kind": "invoke", "target": 1, "reason": "Press"}, before, after))
+
     def test_wrong_result_claim_replans_and_verifies_authoritative_display(self):
         class Desktop(FakeDesktop):
             def observe(self):

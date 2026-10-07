@@ -84,8 +84,91 @@ class ImmediateWorker:
 
 
 class InterfaceFlowTests(unittest.TestCase):
-    def test_startup_discovery_auto_route_research_and_memory(self):
-        root = Root()
+    def test_documentation_worker_runs_off_the_calling_thread(self):
+        started, release, completed = threading.Event(), threading.Event(), threading.Event()
+        identities = []
+        def work():
+            identities.append(threading.get_ident())
+            started.set()
+            release.wait(2)
+            completed.set()
+        thread = ui.launch_research(work)
+        try:
+            self.assertTrue(started.wait(1))
+            self.assertNotEqual(identities[0], threading.get_ident())
+            self.assertFalse(completed.is_set())
+        finally:
+            release.set()
+            thread.join(2)
+        self.assertFalse(thread.is_alive())
+
+    def test_foreground_task_can_start_while_documentation_is_pending(self):
+        class DeferredRoot(Root):
+            def mainloop(self):
+                maintenance = next(fn for delay, fn in self.callbacks if delay == 1000)
+                pump = next(fn for delay, fn in self.callbacks if delay == 100)
+                maintenance()
+                pump()
+                maintenance()  # Documentation is submitted but not completed.
+                self.buttons["Run task"]()
+                pump()
+                self.close()
+        pending = []
+        self.test_startup_discovery_auto_route_research_and_memory(root=DeferredRoot(), background_launcher=pending.append)
+        self.assertEqual(len(pending), 1)
+
+    def test_learn_all_button_starts_persistent_campaign_without_task_commands(self):
+        class CampaignRoot(Root):
+            def mainloop(self):
+                maintenance = next(fn for delay, fn in self.callbacks if delay == 1000)
+                pump = next(fn for delay, fn in self.callbacks if delay == 100)
+                maintenance()
+                pump()
+                self.buttons["Learn all apps"]()
+                maintenance()
+                pump()
+                self.close()
+        root = CampaignRoot()
+        def button(*args, **kwargs):
+            root.buttons[kwargs["text"]] = kwargs["command"]
+            return Widget(*args, **kwargs)
+        desktop = Mock()
+        desktop.windows.return_value = []
+        with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"AGENT_API_KEY": "test-key"}), \
+             patch.object(ui.tk, "Tk", return_value=root), patch.object(ui.tk, "StringVar", Variable), \
+             patch.object(ui.tk, "BooleanVar", Variable), patch.object(ui.tk, "IntVar", Variable), patch.object(ui.tk, "Text", Widget), \
+             patch.multiple(ui.ttk, Frame=Widget, Label=Widget, Entry=Widget, Combobox=Widget, Button=button, Checkbutton=Widget, Spinbox=Widget), \
+             patch.object(ui, "AutomationWorker", ImmediateWorker), patch.object(ui, "launch_research", side_effect=lambda fn: fn()), patch.object(ui, "WindowsDesktop", desktop), \
+             patch.object(ui, "CloudResearcher", return_value=Mock()), \
+             patch.object(ui, "scan_apps", return_value=snapshot([app()])), \
+             patch.object(ui, "register_stop", return_value=threading.Event()), \
+             patch.object(ui, "study_campaign", return_value={"status": "progress"}) as campaign:
+            ui.launch(Path(directory))
+            catalog = Catalog(directory)
+            try:
+                self.assertTrue(catalog.setting("study_campaign"))
+                self.assertTrue(catalog.setting("auto_learn"))
+                self.assertEqual(catalog.setting("daily_limit"), 50)
+            finally:
+                catalog.close()
+        campaign.assert_called_once()
+        self.assertEqual(campaign.call_args.kwargs["daily_limit"], 50)
+
+    def test_manual_practice_claims_the_existing_background_experiment(self):
+        class PracticeRoot(Root):
+            def mainloop(self):
+                maintenance = next(fn for delay, fn in self.callbacks if delay == 1000)
+                pump = next(fn for delay, fn in self.callbacks if delay == 100)
+                maintenance()
+                pump()
+                self.buttons["Practice app"]()
+                pump()
+                self.close()
+        with patch.object(ui, "practice_task", side_effect=AssertionError("The queued experiment must be reused")):
+            self.test_startup_discovery_auto_route_research_and_memory(root=PracticeRoot(), ready_practice=True)
+
+    def test_startup_discovery_auto_route_research_and_memory(self, root=None, background_launcher=None, ready_practice=False):
+        root = root or Root()
         def button(*args, **kwargs):
             root.buttons[kwargs["text"]] = kwargs["command"]
             return Widget(*args, **kwargs)
@@ -101,12 +184,21 @@ class InterfaceFlowTests(unittest.TestCase):
              patch.object(ui.tk, "Tk", return_value=root), patch.object(ui.tk, "StringVar", Variable), \
              patch.object(ui.tk, "BooleanVar", Variable), patch.object(ui.tk, "IntVar", Variable), patch.object(ui.tk, "Text", Widget), \
              patch.multiple(ui.ttk, Frame=Widget, Label=Widget, Entry=Widget, Combobox=Widget, Button=button, Checkbutton=Widget, Spinbox=Widget), \
-             patch.object(ui, "AutomationWorker", ImmediateWorker), patch.object(ui, "WindowsDesktop", desktop), \
+             patch.object(ui, "AutomationWorker", ImmediateWorker), patch.object(ui, "launch_research", side_effect=background_launcher or (lambda fn: fn())), patch.object(ui, "WindowsDesktop", desktop), \
              patch.object(ui, "CloudResearcher", return_value=cloud), patch.object(ui, "TaskRunner", runner), \
              patch.object(ui, "scan_apps", return_value=snapshot([app()])), \
              patch.object(ui, "register_stop", return_value=threading.Event()), \
              patch.object(ui.messagebox, "askokcancel", return_value=True), \
              patch("app_agent.learning.research_app", return_value=blueprint):
+            if ready_practice:
+                catalog = Catalog(directory)
+                try:
+                    catalog.sync(snapshot([app()]))
+                    catalog.save_blueprint(app()["id"], 1, blueprint)
+                    catalog.save_practice_plan(app()["id"], 1, {"capability_name": "Add", "risk": "disposable",
+                                                               "task": "Calculate and verify 42", "expected_result": "42"})
+                finally:
+                    catalog.close()
             ui.launch(Path(directory))
             catalog = Catalog(directory)
             try:
@@ -114,6 +206,11 @@ class InterfaceFlowTests(unittest.TestCase):
                 self.assertEqual(current["blueprint"], blueprint)
                 self.assertEqual(len(catalog.workflows(current["id"], current["generation"])), 1)
                 self.assertIsNotNone(catalog.interface(current["id"], current["generation"]))
+                if ready_practice:
+                    saved = catalog.practice_plan(current["id"], current["generation"], "Add")
+                    self.assertEqual(saved["status"], "tested")
+                    self.assertEqual(saved["attempts"], 1)
+                    self.assertEqual(runner.return_value.run.call_args.kwargs["required_result_text"], "42")
             finally:
                 catalog.close()
         desktop.assert_called_with(10)

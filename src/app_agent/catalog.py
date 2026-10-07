@@ -13,6 +13,7 @@ class Catalog:
     def __init__(self, data_dir):
         root = Path(data_dir)
         root.mkdir(parents=True, exist_ok=True)
+        self.data_dir = root
         self.db = sqlite3.connect(root / "catalog.sqlite3", timeout=20)
         self.db.row_factory = sqlite3.Row
         self.db.executescript("""
@@ -27,6 +28,12 @@ class Catalog:
           observed TEXT NOT NULL, PRIMARY KEY(app_id,generation));
         CREATE TABLE IF NOT EXISTS practice_attempts (app_id TEXT NOT NULL, generation INTEGER NOT NULL,
           capability TEXT NOT NULL, outcome TEXT NOT NULL, body TEXT NOT NULL, created TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS practice_plans (app_id TEXT NOT NULL, generation INTEGER NOT NULL,
+          capability TEXT NOT NULL, status TEXT NOT NULL, body TEXT, error TEXT, retry_at TEXT,
+          attempts INTEGER NOT NULL DEFAULT 0, updated TEXT NOT NULL,
+          PRIMARY KEY(app_id,generation,capability));
+        CREATE INDEX IF NOT EXISTS workflow_app_generation ON workflows(app_id,generation);
+        CREATE INDEX IF NOT EXISTS practice_app_generation ON practice_attempts(app_id,generation,capability);
         """)
 
     def close(self):
@@ -74,10 +81,11 @@ class Catalog:
                 for row in self.db.execute("SELECT * FROM apps WHERE present=1 ORDER BY updated,id")]
 
     def get(self, identity):
-        matches = [app for app in self.apps() if app["id"] == identity]
-        if not matches:
+        row = self.db.execute("SELECT * FROM apps WHERE id=? AND present=1", (identity,)).fetchone()
+        if row is None:
             raise KeyError("App is no longer in the current inventory.")
-        return matches[0]
+        return {**json.loads(row["metadata"]), "generation": row["generation"], "status": row["status"],
+                "error": row["error"], "blueprint": json.loads(row["blueprint"]) if row["blueprint"] else None}
 
     def next_research(self):
         rows = self.db.execute("SELECT id FROM apps WHERE present=1 AND (status='queued' OR (status='research_failed' AND retry_at<=?)) ORDER BY attempts,updated,id", (now(),)).fetchall()
@@ -126,7 +134,12 @@ class Catalog:
         return json.loads(row[0]) if row else None
 
     def coverage(self, identity, generation):
-        app = self.get(identity)
+        try:
+            app = self.get(identity)
+        except KeyError:
+            return []
+        if app["generation"] != generation:
+            return []
         capabilities = (app["blueprint"] or {}).get("capabilities", [])
         observed, visual = {}, {}
         for row in self.db.execute("SELECT record FROM workflows WHERE app_id=? AND generation=?", (identity, generation)):
@@ -135,9 +148,10 @@ class Catalog:
             if name:
                 counts = visual if record["outcome"] == "visual_result_assessed" else observed
                 counts[name] = counts.get(name, 0) + 1
-        attempts = self.practice_attempts(identity, generation)
+        failed = {row[0]: row[1] for row in self.db.execute(
+            "SELECT capability,COUNT(*) FROM practice_attempts WHERE app_id=? AND generation=? AND outcome NOT IN ('result_observed','visual_result_assessed') GROUP BY capability", (identity, generation))}
         return [{"name": cap["name"], "observed_runs": observed.get(cap["name"], 0), "visual_assessments": visual.get(cap["name"], 0),
-                 "failed_attempts": sum(item["capability"] == cap["name"] and item["outcome"] not in ("result_observed", "visual_result_assessed") for item in attempts),
+                 "failed_attempts": failed.get(cap["name"], 0),
                  "status": "result_observed" if cap["name"] in observed else "visual_result_assessed" if cap["name"] in visual else "documented_unverified"} for cap in capabilities]
 
     def record_practice(self, identity, generation, record):
@@ -149,3 +163,105 @@ class Catalog:
     def practice_attempts(self, identity, generation):
         return [{"capability": row[0], "outcome": row[1], "evidence": json.loads(row[2]).get("history", [])[-2:]}
                 for row in self.db.execute("SELECT capability,outcome,body FROM practice_attempts WHERE app_id=? AND generation=? ORDER BY created DESC LIMIT 20", (identity, generation))]
+
+    def practice_plan(self, identity, generation, capability):
+        row = self.db.execute("SELECT * FROM practice_plans WHERE app_id=? AND generation=? AND capability=?", (identity, generation, capability)).fetchone()
+        return {**dict(row), "body": json.loads(row["body"]) if row["body"] else None} if row else None
+
+    def next_practice_capability(self, identity, generation, target_runs=2):
+        coverage = sorted(self.coverage(identity, generation), key=lambda item: (item["observed_runs"], item["failed_attempts"], item["name"]))
+        for capability in coverage:
+            if capability["observed_runs"] >= target_runs:
+                continue
+            plan = self.practice_plan(identity, generation, capability["name"])
+            if plan and (plan["status"] == "ready" or (plan["retry_at"] and plan["retry_at"] > now())):
+                continue
+            if plan and plan["status"] == "running":
+                # Recover an expired lease through ready_practice_plan; retain
+                # the exact experiment rather than generating another one.
+                continue
+            return capability["name"]
+        return None
+
+    def save_practice_plan(self, identity, generation, plan):
+        try:
+            app = self.get(identity)
+        except KeyError:
+            return False
+        name = plan.get("capability_name")
+        if app["generation"] != generation or name not in {cap["name"] for cap in (app["blueprint"] or {}).get("capabilities", [])}:
+            return False
+        if plan.get("risk") != "disposable" or any(not isinstance(plan.get(field), str) or not plan[field].strip() for field in ("task", "expected_result")):
+            raise ValueError("Only a documented disposable experiment with an expected result can be queued.")
+        with self.db:
+            changed = self.db.execute("INSERT INTO practice_plans (app_id,generation,capability,status,body,updated) SELECT ?,?,?,'ready',?,? WHERE EXISTS (SELECT 1 FROM apps WHERE id=? AND generation=? AND present=1) ON CONFLICT(app_id,generation,capability) DO UPDATE SET status='ready',body=excluded.body,error=NULL,retry_at=NULL,updated=excluded.updated WHERE practice_plans.status!='running' OR practice_plans.retry_at<=excluded.updated",
+                                      (identity, generation, name, json.dumps(plan), now(), identity, generation))
+        return changed.rowcount == 1
+
+    def defer_practice_plan(self, identity, generation, capability, error, hours=24):
+        if not any(cap["name"] == capability for cap in self.coverage(identity, generation)):
+            return False
+        retry = (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
+        with self.db:
+            changed = self.db.execute("INSERT INTO practice_plans (app_id,generation,capability,status,error,retry_at,updated) VALUES (?,?,?,'deferred',?,?,?) ON CONFLICT(app_id,generation,capability) DO UPDATE SET status='deferred',error=excluded.error,retry_at=excluded.retry_at,updated=excluded.updated WHERE practice_plans.status!='running' OR practice_plans.retry_at<=excluded.updated",
+                            (identity, generation, capability, str(error)[:1000], retry, now()))
+        return changed.rowcount == 1
+
+    def ready_practice_plan(self, identity, generation):
+        coverage = {cap["name"]: cap for cap in self.coverage(identity, generation)}
+        rows = self.db.execute("SELECT * FROM practice_plans WHERE app_id=? AND generation=? AND (status='ready' OR (status='running' AND retry_at<=?)) ORDER BY attempts,updated,capability", (identity, generation, now())).fetchall()
+        rows.sort(key=lambda row: coverage.get(row["capability"], {}).get("observed_runs", 0))
+        for row in rows:
+            if row["capability"] in coverage and coverage[row["capability"]]["observed_runs"] < 2 and row["body"]:
+                return json.loads(row["body"])
+        return None
+
+    def claim_practice_plan(self, identity, generation, capability):
+        if not any(cap["name"] == capability and cap["observed_runs"] < 2 for cap in self.coverage(identity, generation)):
+            return False
+        timestamp = now()
+        lease = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        with self.db:
+            changed = self.db.execute("UPDATE practice_plans SET status='running',attempts=attempts+1,retry_at=?,updated=? WHERE app_id=? AND generation=? AND capability=? AND (status='ready' OR (status='running' AND retry_at<=?)) AND EXISTS (SELECT 1 FROM apps WHERE id=? AND generation=? AND present=1)",
+                                      (lease, timestamp, identity, generation, capability, timestamp, identity, generation))
+        return changed.rowcount == 1
+
+    def finish_practice_plan(self, identity, generation, record):
+        capability = record.get("capability_name")
+        if not any(cap["name"] == capability for cap in self.coverage(identity, generation)):
+            return False
+        if record.get("outcome") in ("result_observed", "visual_result_assessed") and record.get("actions_executed", 0) < 1:
+            record = {**record, "outcome": "observed_without_execution"}
+        self.record_practice(identity, generation, record)
+        success = self.save_workflow(identity, generation, record)
+        retry = (datetime.now(timezone.utc) + timedelta(hours=6)).isoformat()
+        with self.db:
+            self.db.execute("UPDATE practice_plans SET status=?,error=?,retry_at=?,updated=? WHERE app_id=? AND generation=? AND capability=?",
+                            ("tested" if success else "deferred", None if success else record.get("outcome", "error"), retry, now(), identity, generation, capability))
+        return success
+
+    def learning_overview(self):
+        apps = self.apps()
+        summary = {"apps_detected": len(apps), "apps_documented": 0, "apps_queued": 0, "apps_research_deferred": 0,
+                   "documented_capabilities": 0, "capabilities_tested_once": 0, "capabilities_tested_repeatedly": 0,
+                   "capabilities_visually_assessed": 0, "capabilities_without_observed_test": 0, "experiments_ready": 0,
+                   "experiments_deferred": 0, "initial_documentation_complete": False, "documentation_rounds": 0}
+        for app in apps:
+            summary["apps_documented"] += bool(app["blueprint"])
+            summary["apps_queued"] += app["status"] == "queued"
+            summary["apps_research_deferred"] += app["status"] == "research_failed"
+            if app["blueprint"]:
+                summary["documentation_rounds"] += self.setting(f"documentation:{app['id']}:{app['generation']}", {}).get("rounds", 1)
+            coverage = self.coverage(app["id"], app["generation"])
+            summary["documented_capabilities"] += len(coverage)
+            summary["capabilities_tested_once"] += sum(cap["observed_runs"] > 0 for cap in coverage)
+            summary["capabilities_tested_repeatedly"] += sum(cap["observed_runs"] >= 2 for cap in coverage)
+            summary["capabilities_visually_assessed"] += sum(cap["visual_assessments"] > 0 for cap in coverage)
+            summary["capabilities_without_observed_test"] += sum(cap["observed_runs"] == 0 for cap in coverage)
+        for row in self.db.execute("SELECT p.status,COUNT(*) FROM practice_plans p JOIN apps a ON a.id=p.app_id AND a.generation=p.generation AND a.present=1 GROUP BY p.status"):
+            if row[0] == "ready":
+                summary["experiments_ready"] += row[1]
+            elif row[0] == "deferred":
+                summary["experiments_deferred"] += row[1]
+        summary["initial_documentation_complete"] = bool(apps) and summary["apps_documented"] == len(apps)
+        return summary

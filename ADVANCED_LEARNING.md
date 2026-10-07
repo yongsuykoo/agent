@@ -1,30 +1,23 @@
-# Version 0.3.0: wider app controls and independent practice
+# App controls and independent practice
 
-Update 0.3.1 adds independent pattern probing, editable text detection for Notepad-style controls, and bounded replanning after an unsupported proposed action. No rejected action is executed. When a keyboard fallback is needed, read-only status and actual control focus must be confirmed first. The specific failing Windows control still needs Inspect window output to diagnose fully.
+Version 0.5.0 uses the persistent campaign in [AUTONOMOUS_LEARNING.md](AUTONOMOUS_LEARNING.md). Research and experiment design require no demonstrations. Execution requires permission for affected app controls.
 
-The previous Windows run demonstrated autonomous Calculator practice. This release extends the architecture to unfamiliar apps. It does not claim that every app is now fully understood or supported.
+## Supported controls
 
-## New capabilities
+- Accessibility Invoke, editable values, selection, explicit toggle state, expand/collapse, scroll and bounded clicks.
+- Native Windows Edit entry/readback when UI Automation omits patterns. Parent/process checks and password/read-only guards apply.
+- Stable actions bound to observed automation IDs and/or control names. Conflicting identities and changed approval snapshots require replanning.
+- Bounded recovery after unsupported actions or failed verification, with version-specific workflows retained as evidence.
+- Optional per-task screenshots and coordinate clicks inside the selected window. Separate consent is required; generic background grants exclude coordinate clicks. Images may include overlapping windows. Visual completion is assessed separately from accessible-output verification.
 
-- Windows accessibility control now includes Invoke, editable values, selection, toggles with explicit desired state, expand/collapse, scroll, and bounded control-click fallback. Password controls are excluded. Editable document fallback escapes literal text so shortcut characters are not interpreted as arbitrary hotkeys.
-- Observations include control actions, visible values, and selection/toggle/scroll state. After execution, the agent waits up to two seconds for observable change. Errors are fed into fresh planning with documentation recovery guidance; it stops after three action failures or repeated actions without observed effect.
-- Optional selected-app screenshots support visual planning and coordinate clicks inside the selected window. Image coordinates are checked, resizing is detected, and approval is invalidated when the captured view changes. Screenshot bytes are sent to the model only after explicit per-task consent and are not saved to sessions. Image hashes are retained as evidence. Screen captures may contain overlapping windows: avoid confidential data.
-- Screenshot-only completion is labeled `visual_result_assessed`, separately from accessible text/value matching (`result_observed`). A model's image assessment is weaker evidence than a dedicated functional validator.
-- Practice tasks now identify a documented capability. Apps & knowledge reports observed runs, visual assessments, failed attempts, and untested capabilities separately. A successful test does not verify all features.
-- Beyond Calculator, users can grant session-only permission for specific controls in one existing app window/process. The agent then creates and attempts a documented disposable task without demonstrations or per-step approval. Newly appearing controls, other windows/processes, password fields, and visual coordinate clicks do not inherit that grant.
+## Permissions and outcomes
 
-## Windows test sequence
+**Run task** and manual **Practice app** request step approval, with an option to authorize the remaining task. **Auto-practice Calculator** permits its arithmetic allowlist. **Apps & knowledge → Grant practice on specific controls…** permits selected, unambiguous controls in one existing window/process for the current app version. Generic grants end on STOP or restart. New controls and other windows are excluded.
 
-1. Download the current repository, extract to a new folder, and run windows/Setup.cmd, then windows/Start.cmd. Confirm the title shows 0.3.0. Existing catalog memory remains under LOCALAPPDATA/AppAgent.
-2. Test the Calculator task again with screenshots off. Check that each executed action is followed by a state change and that the result is correct. The prior redundant Clear action should be less likely with the wait/check loop; Windows testing must confirm this.
-3. Open a fresh disposable Notepad document. Select its window and request `Type exactly: Hello from my personal agent`. Approve the action or authorize that task. Do not use an existing document: value/text entry can replace its contents. Do not save the experiment.
-4. For a less accessible app, enable `Use selected-app screenshots for visual control`, then run a short reversible task. Consent explains which images are shared. Start with per-action approval. The model must support image input. Visual-only completion remains a model assessment, not a guarantee.
-5. For independent practice in another app, first open exactly one disposable window of that app. In Apps & knowledge select the app and click `Grant practice on specific controls…`. Choose only the controls you authorize. The grant is permission, not a demonstration of how to use them. Avoid controls that save, delete, send, purchase, install, or change account/security settings.
-6. Leave background study enabled and the agent open. At the next maintenance pass it can generate an experiment from the documented blueprint and attempt it within that grant. Background practice is limited to three attempts per local day across apps, with at most one attempt per app version per day. Generic practice is capped at 12 steps. Unsupported controls or missing permissions stop the attempt.
-7. Inspect capability coverage and session evidence. STOP revokes generic practice grants and pauses study. Grants also disappear on restart and cannot be used for a different app version.
+Explicit `Type exactly:` and `Replace the document text with exactly:` commands require the whole editor value to match. General experiments require the plan's expected text before recording `result_observed`. This is narrower than a dedicated functional validator for every app. A result with no executed action does not verify a practice workflow.
 
-## Remaining limits
+Background experiments share three attempts per local day. A capability becomes eligible after six hours until it has two observed runs. Failed/unsupported operations remain visible as gaps. Controls can change data: grant them in disposable workspaces. Scope enforcement does not create a sandbox.
 
-This is still a Windows test release. Cloud tests use simulated Windows controls, images, and models. New control patterns, literal document input, screen capture, visual clicks, and generic practice require actual Windows acceptance testing. Different apps implement accessibility differently; unsupported dialogs and multi-app operations can still block tasks. Granting controls does not make experiments risk-free: use disposable data and review the scope.
+## Testing status
 
-Automatic discovery and research continue as described in LEARNING_RELEASE.md. Universal reliable operation, complete reverse engineering of closed-source apps, unrestricted background troubleshooting, and automatic safe sandbox creation for arbitrary software remain unresolved work. Progress is measured by per-capability evidence, not a claim of complete understanding.
+The 0.4.6 live Windows self-test passed all 12 named Notepad and Calculator checks. Version 0.5.0 adds simulated campaign and UI regressions; live campaign results remain required. Universal operation, unrestricted repairs and complete reverse engineering are unfinished.

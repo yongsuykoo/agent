@@ -6,7 +6,7 @@ import types
 import unittest
 from unittest.mock import Mock, patch
 
-from app_agent.self_test import NotepadFixture, SkipCheck, editor, run_checks, self_test, wait_until
+from app_agent.self_test import NotepadFixture, SkipCheck, editor, learning_experiment, run_checks, self_test, wait_until
 
 
 def snapshot(value="hello", handle=41, process=81, title="test"):
@@ -97,6 +97,25 @@ class SelfTestTests(unittest.TestCase):
             self.assertFalse(fixture.approve({"kind": "type", "target": 2}, current))
             self.assertFalse(fixture.approve({"kind": "type", "target": 1}, {**current, "window_handle": 42}))
 
+    def test_learning_check_rejects_a_mismatched_generated_goal_before_typing(self):
+        cloud = Mock()
+        cloud.request.return_value = {"output": [{"content": [{"type": "output_text", "text": json.dumps({
+            "task": "Replace the document text with exactly: First", "expected_result": "Different",
+            "capability_name": "Write", "risk": "disposable"})}]}]}
+        with tempfile.TemporaryDirectory() as directory, patch("app_agent.learning.research_app", return_value={"capabilities": [{"name": "Write"}]}):
+            fixture = self.fixture(directory)
+            with self.assertRaisesRegex(RuntimeError, "matching its expected result"):
+                learning_experiment(fixture, cloud, directory, threading.Event(), lambda text: None)
+            fixture.desktop.act.assert_not_called()
+
+    def test_learning_check_without_credentials_skips_without_opening_or_researching(self):
+        fixture = Mock()
+        with patch("app_agent.learning.research_app") as research:
+            with self.assertRaises(SkipCheck):
+                learning_experiment(fixture, None, "unused", threading.Event(), lambda text: None)
+            fixture.observe.assert_not_called()
+            research.assert_not_called()
+
     def test_save_does_not_send_shortcut_into_other_foreground_window(self):
         functions = types.SimpleNamespace(GetForegroundWindow=lambda: 999)
         package = types.ModuleType("pywinauto")
@@ -132,7 +151,7 @@ class SelfTestTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "interactive Windows"):
                 self_test("unused")
 
-    def test_entire_suite_runs_tasks_and_verifies_report_with_simulated_windows(self, changed_process=False):
+    def test_entire_suite_runs_tasks_and_verifies_report_with_simulated_windows(self, changed_process=False, learning_failure=False):
         from test_catalog import app, snapshot as inventory_snapshot
         class Desktop:
             def __init__(self, title, calculator=False):
@@ -154,6 +173,12 @@ class SelfTestTests(unittest.TestCase):
         class Cloud:
             def request(self, **payload):
                 request = json.loads(payload["input"])
+                if "blueprint" in request and "observation" not in request:
+                    self_test_case.assertEqual(request["experiment_context"]["required_task_form"],
+                                               "Replace the document text with exactly: <your own short test text>")
+                    action = {"task": "Replace the document text with exactly: Independent practice", "expected_result": "Independent practice",
+                              "capability_name": "Write text", "risk": "disposable"}
+                    return {"output": [{"content": [{"type": "output_text", "text": json.dumps(action)}]}]}
                 goal = request.get("required_exact_editor_text")
                 if goal is not None:
                     current = request["observation"]["controls"][0]["value"]
@@ -179,12 +204,17 @@ class SelfTestTests(unittest.TestCase):
         package = types.ModuleType("pywinauto")
         package.win32functions = types.SimpleNamespace(GetForegroundWindow=lambda: 41)
         calculator = Desktop("Calculator", calculator=True)
+        self_test_case = self
+        blueprint = {"name": "Microsoft Windows Notepad", "version": "", "sources": [{"url": "https://example.com/notepad-manual"}],
+                     "capabilities": [{"name": "Write text", "steps": ["Type into the editor"], "expected_result": "Text appears"}]}
         with tempfile.TemporaryDirectory() as directory, \
              patch("app_agent.self_test.sys.platform", "win32"), \
              patch("app_agent.self_test.foreground_window", return_value=41), \
              patch("app_agent.self_test.doctor", return_value={"visible_windows": 1, "dependencies": {"pywinauto": True}}), \
              patch("app_agent.self_test.scan_apps", return_value=inventory_snapshot([app()])), \
              patch("app_agent.self_test.calculator_smoke", return_value={"passed": 3, "window_handle": 41, "process_id": 81}), \
+             patch("app_agent.learning.research_app", side_effect=RuntimeError("Documentation unavailable") if learning_failure else None,
+                   return_value=blueprint) as research, \
              patch.object(NotepadFixture, "open", open_fixture), \
              patch("app_agent.self_test.WindowsDesktop") as windows:
             # Other Calculator windows must not affect the established fixture.
@@ -194,21 +224,37 @@ class SelfTestTests(unittest.TestCase):
             if changed_process:
                 self.assertEqual(report["status"], "failed")
                 self.assertEqual(report["counts"]["failed"], 1)
-                self.assertIn("changed identity", report["checks"][-1]["error"])
+                failed = next(item for item in report["checks"] if item["name"] == "AI Calculator task")
+                self.assertIn("changed identity", failed["error"])
                 self.assertEqual(calculator.value, "6")
                 return
+            if learning_failure:
+                self.assertEqual(report["status"], "failed")
+                self.assertEqual(report["counts"]["passed"], 12)
+                self.assertEqual(report["counts"]["failed"], 1)
+                self.assertIn("Documentation unavailable", report["checks"][-1]["error"])
+                return
             self.assertEqual(report["status"], "passed", json.dumps(report["checks"], indent=2))
-            self.assertEqual(report["counts"]["passed"], 12)
+            self.assertEqual(report["counts"]["passed"], 13)
             self.assertEqual(json.loads(Path(report["report_path"]).read_text(encoding="utf-8")), report)
             sessions = Path(report["report_path"]).parent / "sessions.jsonl"
             records = [json.loads(line) for line in sessions.read_text(encoding="utf-8").splitlines()]
-            self.assertEqual(len(records), 3)
+            self.assertEqual(len(records), 4)
             self.assertTrue(all(r["actions_executed"] == 1 and r["outcome"] == "result_observed" for r in records))
+            research.assert_called_once()
+            self.assertEqual(research.call_args.args[:2], ("Microsoft Windows Notepad", ""))
+            details = report["checks"][-1]["details"]
+            self.assertEqual(details["overview"]["capabilities_tested_once"], 1)
+            self.assertEqual(details["overview"]["capabilities_tested_repeatedly"], 0)
+            self.assertEqual(details["documentation_sources"], ["https://example.com/notepad-manual"])
             windows.assert_called_once_with(41)
             windows.windows.assert_not_called()
 
     def test_calculator_reused_handle_with_different_process_is_rejected(self):
         self.test_entire_suite_runs_tasks_and_verifies_report_with_simulated_windows(changed_process=True)
+
+    def test_learning_research_failure_does_not_hide_other_windows_results(self):
+        self.test_entire_suite_runs_tasks_and_verifies_report_with_simulated_windows(learning_failure=True)
 
     def test_entire_simulated_suite_with_windows_newline_translation(self):
         original = Path.write_text

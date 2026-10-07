@@ -82,6 +82,9 @@ def reconcile_action(action, before, after):
     """Remap a stable target; reject changed data or ambiguous controls."""
     if before["window"] != after["window"]:
         return None
+    for field in ("window_handle", "process_id"):
+        if before.get(field) is not None and before[field] != after.get(field):
+            return None
     if action["kind"] == "click_point":
         return dict(action) if before.get("viewport") == after.get("viewport") else None
     def content(snapshot):

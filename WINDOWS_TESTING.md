@@ -105,3 +105,12 @@ The 0.4.5 Windows report showed 10 passed checks, failed Calculator detection, a
 ### Confirmed live Windows milestone (0.4.6)
 
 The subsequently uploaded 0.4.6 report passed all 12 checks: zero failures, skipped checks or cancellations. Runtime was Windows with Python 3.14.0; inventory found 404 apps with no scan warnings. Native Calculator results were 42, 4 and 6. All Notepad editing and independent disk-save checks passed, both AI Notepad tasks executed and verified one edit each, and the AI Calculator task executed 7 actions and displayed 45. This confirms the interactive suite on that computer. It does not certify the remaining installed apps, voice input, all controls, or arbitrary troubleshooting. No further rerun of this suite is needed without a relevant code change or new failure.
+
+
+### Persistent learning campaign (0.5.0)
+
+See [AUTONOMOUS_LEARNING.md](AUTONOMOUS_LEARNING.md) for Learn all apps. The agent now batches documentation research, prepares per-capability experiments, retains retry queues across restarts, and searches additional manuals after initial coverage. Documentation runs separately from native automation. Manual Practice app reuses prepared experiments. Approval snapshots reject changed window handles/processes. These changes have simulated regression coverage; the new campaign has not been tested on an interactive Windows desktop in the cloud.
+
+After updating to a fresh folder, starting the campaign begins research and planning. With Calculator permission or disposable-app control grants, the agent runs its own experiments and records outcomes; users do not enter procedures. Inspect Apps & knowledge and learning-report.json for coverage and failures. Existing Self-test remains the automatic native/model check. Provider calls incur usage charges. Completed documentation or two experiments do not establish full application mastery.
+
+The 0.5.0 suite adds check 13, AI documentation-to-practice learning. It researches Notepad from scratch in an isolated test catalog, asks the model to choose documented text entry and generate its own exact-text experiment, queues/claims it, and permits typing only in the disposable fixture editor. It verifies actual editor contents and records sources and per-capability evidence. It never grants document saving, menus or other windows to that model task. This additional check incurs research/search/model charges; missing credentials skip it, and research/planning/execution failures are reported independently. The new live result is pending.
