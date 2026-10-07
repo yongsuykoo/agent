@@ -7,6 +7,13 @@ from app_agent.research import CloudResearcher
 
 
 class CloudRequestTests(unittest.TestCase):
+    def test_pasted_logs_rejected_without_echoing_value(self):
+        value = "No app blueprint found.\nError: secret-pasted-value"
+        with self.assertRaises(RuntimeError) as raised:
+            CloudResearcher(key=value)
+        self.assertNotIn(value, str(raised.exception))
+        self.assertNotIn("secret-pasted-value", str(raised.exception))
+
     def test_search_uses_compatible_tool_and_choice(self):
         cloud = CloudResearcher(key="test-key")
         cloud.request = Mock(return_value={"output": [{"content": [{"annotations": [

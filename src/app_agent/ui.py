@@ -8,7 +8,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 from .desktop import WindowsDesktop
 from .knowledge import KnowledgeStore
-from .research import CloudResearcher, output_text, research_app
+from .research import CloudResearcher, output_text, research_app, validate_api_key
 from .runner import TaskRunner
 from .voice import Recorder, transcribe
 from .hotkey import register_stop
@@ -21,7 +21,10 @@ def launch(data_dir):
     if not (os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")):
         key = simpledialog.askstring("Cloud AI setup", "OpenAI API key (kept in memory for this session).\nLeave blank to inspect windows without AI.", show="*", parent=root)
         if key and key.strip():
-            os.environ["AGENT_API_KEY"] = key.strip()
+            try:
+                os.environ["AGENT_API_KEY"] = validate_api_key(key.strip())
+            except RuntimeError as error:
+                messagebox.showerror("Invalid API key", str(error), parent=root)
     events = queue.Queue()
     cancel = threading.Event()
     state = {"busy": False, "recording": False, "approval": None, "windows": [], "closing": False, "voice_timer": None}

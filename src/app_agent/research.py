@@ -100,12 +100,21 @@ def output_text(response):
                      for part in item.get("content", []) if part.get("type") == "output_text")
 
 
+def validate_api_key(key):
+    if not isinstance(key, str) or not key:
+        raise RuntimeError("Enter an OpenAI API key in the masked API-key field, not an error message or chat text.")
+    if any(character.isspace() for character in key) or not key.isascii() or not key.isprintable():
+        raise RuntimeError("Invalid API-key input: keys must be a single line without spaces. Enter the key from your OpenAI API account, not an error message. The entered value has not been displayed or saved.")
+    return key
+
+
 class CloudResearcher:
     def __init__(self, key=None, model=None):
         self.key = key or os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")
         self.model = model or os.getenv("AGENT_MODEL", "gpt-4.1")
         if not self.key:
             raise RuntimeError("Cloud research needs AGENT_API_KEY. Add it securely in environment settings; do not paste it in chat.")
+        validate_api_key(self.key)
 
     def request(self, **payload):
         body = json.dumps({"model": self.model, "store": False, **payload}).encode()

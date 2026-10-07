@@ -5,7 +5,7 @@ import os
 import uuid
 import wave
 from urllib.request import Request, build_opener
-from .research import NoRedirects
+from .research import NoRedirects, validate_api_key
 
 
 class Recorder:
@@ -47,6 +47,7 @@ def transcribe(audio):
     key = os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")
     if not key:
         raise RuntimeError("Voice transcription requires AGENT_API_KEY.")
+    validate_api_key(key)
     boundary = uuid.uuid4().hex
     body = (f'--{boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-1\r\n'
             f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="command.wav"\r\nContent-Type: audio/wav\r\n\r\n').encode()
