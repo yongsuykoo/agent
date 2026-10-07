@@ -153,6 +153,10 @@ class SelfTestTests(unittest.TestCase):
                     current = request["observation"]["controls"][1]["name"]
                     action = ({"kind": "finish", "expected_text": "45", "reason": "Verified"} if current == "45"
                               else {"kind": "invoke", "target": 1, "reason": "Calculate"})
+                target = next((c for c in request["observation"]["controls"] if c["id"] == action.get("target")), None)
+                if target:
+                    action["automation_id"] = target.get("automation_id")
+                    action["target_name"] = target["name"]
                 return {"output": [{"content": [{"type": "output_text", "text": json.dumps(action)}]}]}
         def open_fixture(fixture):
             fixture.path.write_text("", encoding="utf-8")

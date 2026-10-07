@@ -23,7 +23,16 @@ class FakeCloud:
     def __init__(self, actions):
         self.actions = iter(actions)
     def request(self, **payload):
-        return {"output": [{"content": [{"type": "output_text", "text": json.dumps(next(self.actions))}]}]}
+        action = dict(next(self.actions))
+        model_input = payload.get("input", "{}")
+        if isinstance(model_input, list):
+            model_input = model_input[0]["content"][0]["text"]
+        snapshot = json.loads(model_input).get("observation", {})
+        target = next((c for c in snapshot.get("controls", []) if c["id"] == action.get("target")), None)
+        if target and action.get("kind") not in ("finish", "blocked"):
+            action.setdefault("automation_id", target.get("automation_id"))
+            action.setdefault("target_name", target["name"])
+        return {"output": [{"content": [{"type": "output_text", "text": json.dumps(action)}]}]}
 
 
 class RunnerTests(unittest.TestCase):
@@ -74,11 +83,11 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(desktop.actions, [])
 
     def test_false_completion_fails_verification(self):
-        result, desktop = self.execute([{"kind": "finish", "expected_text": "42", "reason": "Done"}])
+        result, desktop = self.execute([{"kind": "finish", "expected_text": "42", "reason": "Done"}]*3)
         self.assertEqual(result["outcome"], "verification_failed")
 
     def test_button_label_does_not_prove_completion(self):
-        result, desktop = self.execute([{"kind": "finish", "expected_text": "Add", "reason": "Done"}])
+        result, desktop = self.execute([{"kind": "finish", "expected_text": "Add", "reason": "Done"}]*3)
         self.assertEqual(result["outcome"], "verification_failed")
 
     def test_cancel_before_request(self):

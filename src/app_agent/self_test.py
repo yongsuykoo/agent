@@ -11,6 +11,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError, version
 
 from .desktop import WindowsDesktop, foreground_window
 from .runner import TaskRunner
@@ -28,7 +29,12 @@ def run_checks(checks, report_path, cancel, emit):
     """Persist after each check; one failure does not hide independent results."""
     report_path = Path(report_path)
     report_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        package_version = version("app-agent")
+    except PackageNotFoundError:
+        package_version = "unknown"
     report = {"started_at": datetime.now(timezone.utc).isoformat(), "checks": [],
+              "agent_version": package_version,
               "report_path": str(report_path), "scope": "Windows inventory, Calculator, disposable Notepad; not universal app certification"}
     for name, check in checks:
         if cancel.is_set():
@@ -200,7 +206,8 @@ def self_test(data_dir, cloud=None, emit=print, cancel=None):
         def approve(action, snapshot):
             return not cancel.is_set() and (snapshot["window_handle"], snapshot["process_id"]) == identity and calculator_action(action, snapshot)
         result = TaskRunner(desktop, cloud, approve, emit, run_dir, cancel).run(
-            "Clear the current calculation. Calculate 17 plus 28 and verify the result is 45.", max_steps=14, effect_timeout=1)
+            "Clear the current calculation. Calculate 17 plus 28 and verify the result is 45.", max_steps=24, effect_timeout=1,
+            required_result_text="45", result_control_id="CalculatorResults")
         display = next(c["name"] for c in desktop.observe()["controls"] if c["automation_id"] == "CalculatorResults")
         if result["outcome"] != "result_observed" or re.findall(r"\d+", display)[-1:] != ["45"] or result["actions_executed"] < 1:
             last = next((entry.get("error") or entry.get("action", {}).get("reason") for entry in reversed(result["history"])

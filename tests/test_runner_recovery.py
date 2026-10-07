@@ -6,6 +6,54 @@ from test_runner import FakeDesktop, FakeCloud, observation
 
 
 class RecoveryTests(unittest.TestCase):
+    def test_stable_identity_corrects_seven_vs_eight_numeric_index(self):
+        controls = [{"id": 43, "name": "Seven", "type": "Button", "automation_id": "num7Button", "enabled": True, "visible": True, "actions": ["invoke"]},
+                    {"id": 44, "name": "Eight", "type": "Button", "automation_id": "num8Button", "enabled": True, "visible": True, "actions": ["invoke"]}]
+        snapshot = {"controls": controls}
+        action = {"kind": "invoke", "reason": "Press Seven", "target": 44, "automation_id": "num7Button", "target_name": "Seven"}
+        self.assertEqual(validate_action(action, snapshot, require_identity=True)["target"], 43)
+        with self.assertRaises(ValueError):
+            validate_action({**action, "automation_id": "num8Button"}, snapshot, require_identity=True)
+        controls.append({**controls[0], "id": 49})
+        with self.assertRaises(ValueError):
+            validate_action(action, snapshot, require_identity=True)
+
+    def test_numeric_index_alone_is_rejected_for_model_actions(self):
+        with self.assertRaisesRegex(ValueError, "numeric indexes alone"):
+            validate_action({"kind": "invoke", "target": 1, "reason": "Press"}, observation(), require_identity=True)
+
+    def test_wrong_result_claim_replans_and_verifies_authoritative_display(self):
+        class Desktop(FakeDesktop):
+            def observe(self):
+                return {"window": "Calculator", "controls": [
+                    {"id": 1, "name": "Clear", "type": "Button", "automation_id": "clearButton", "enabled": True, "visible": True, "actions": ["invoke"]},
+                    {"id": 2, "name": "Display is " + ("45" if self.actions else "46"), "type": "Text", "automation_id": "CalculatorResults", "enabled": True, "visible": True}]}
+        class Cloud(FakeCloud):
+            def request(self, **payload):
+                schema = payload["text"]["format"]
+                assert schema["type"] == "json_schema" and schema["strict"] is True
+                assert schema["schema"]["additionalProperties"] is False
+                assert "automation_id" in schema["schema"]["required"]
+                return super().request(**payload)
+        cloud = Cloud([{"kind": "finish", "reason": "Wrong claim", "expected_text": "46"},
+                       {"kind": "invoke", "target": 1, "reason": "Recover"},
+                       {"kind": "finish", "reason": "Correct result", "expected_text": "45"}])
+        result = self.execute(Desktop(), cloud, required_result_text="45", result_control_id="CalculatorResults")
+        self.assertEqual(result["outcome"], "result_observed")
+        self.assertEqual(result["actions_executed"], 1)
+        self.assertEqual(result["history"][0]["execution"], "rejected_completion")
+        self.assertIn("45", result["history"][0]["error"])
+
+    def test_numeric_display_does_not_accept_substring_or_negative_result(self):
+        for wrong in ("145", "-45", "45.5"):
+            class Desktop(FakeDesktop):
+                def observe(self):
+                    return {"window": "Calculator", "controls": [{"id": 1, "name": "Display is " + wrong,
+                            "type": "Text", "automation_id": "CalculatorResults", "enabled": True, "visible": True}]}
+            cloud = FakeCloud([{"kind": "finish", "reason": "Done", "expected_text": "45"}]*3)
+            result = self.execute(Desktop(), cloud, required_result_text="45", result_control_id="CalculatorResults")
+            self.assertEqual(result["outcome"], "verification_failed")
+
     def test_unsupported_action_replans_to_advertised_text_entry(self):
         class Desktop(FakeDesktop):
             def observe(self):
