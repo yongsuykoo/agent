@@ -60,3 +60,7 @@ Close the agent, download the current repository ZIP from GitHub, extract into a
 ### Classic Notepad text entry (0.3.2)
 
 Native Windows Edit controls now use a window- and process-checked Win32 adapter when UI Automation omits text-entry patterns. Password and read-only styles block writes. Inspect window should list `type` for the blank Notepad Text Editor, and subsequent observations read its text back. This path has simulated regression coverage; live Windows validation remains required.
+
+### Exact text completion (0.3.3)
+
+The session log now prints the submitted Task command. Explicit `Type exactly:` and `Replace the document text with exactly:` commands require the whole observed editor value to match the requested text. A premature finish is rejected and replanned, with a bounded verification failure if it repeats. General tasks still use model-selected expected results and do not have this deterministic exact-text guarantee.

@@ -19,6 +19,27 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(result["history"][0]["execution"], "rejected_invalid_action")
         self.assertIn("available actions: type", result["history"][0]["error"])
 
+    def test_old_greeting_cannot_satisfy_exact_replacement_task(self):
+        goal = "My agent can operate Notepad."
+        class Desktop(FakeDesktop):
+            def observe(self):
+                value = self.actions[-1]["text"] if self.actions else "Hello from my personal agent"
+                return {"window": "Notepad", "controls": [{"id": 1, "name": "Text Editor", "type": "Edit", "automation_id": "15", "enabled": True, "visible": True, "actions": ["type"], "value": value}]}
+        wrong = {"kind": "finish", "expected_text": "Hello from my personal agent", "reason": "Old greeting present"}
+        task = "Replace the document text with exactly: " + goal + " Then verify the text."
+        with tempfile.TemporaryDirectory() as directory:
+            desktop = Desktop()
+            cloud = FakeCloud([wrong, {"kind": "type", "target": 1, "text": goal, "reason": "Replace"},
+                               {"kind": "finish", "expected_text": goal, "reason": "Correct text present"}])
+            result = TaskRunner(desktop, cloud, lambda a, o: True, lambda m: None, directory).run(task, effect_timeout=0)
+        self.assertEqual(result["outcome"], "result_observed")
+        self.assertEqual(result["actions_executed"], 1)
+        self.assertEqual(result["history"][0]["execution"], "rejected_completion")
+        with tempfile.TemporaryDirectory() as directory:
+            result = TaskRunner(Desktop(), FakeCloud([wrong]*3), lambda a, o: True, lambda m: None, directory).run(task)
+        self.assertEqual(result["outcome"], "verification_failed")
+        self.assertEqual(result["actions_executed"], 0)
+
     def execute(self, desktop, cloud, **kwargs):
         with tempfile.TemporaryDirectory() as directory:
             return TaskRunner(desktop, cloud, lambda action, obs: True, lambda text: None, directory).run("Calculate", effect_timeout=0, **kwargs)
