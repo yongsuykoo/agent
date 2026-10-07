@@ -117,6 +117,15 @@ class CloudResearcher:
         validate_api_key(self.key)
 
     def request(self, **payload):
+        # JSON mode checks input messages, independently of instructions.
+        if payload.get("text", {}).get("format", {}).get("type") == "json_object":
+            original = payload.get("input", "")
+            if isinstance(original, str):
+                payload["input"] = "Return the requested result as JSON.\n" + original
+            elif isinstance(original, list):
+                payload["input"] = [{"role": "developer", "content": "Return the requested result as JSON."}, *original]
+            else:
+                raise ValueError("JSON requests require a string or message-list input.")
         body = json.dumps({"model": self.model, "store": False, **payload}).encode()
         req = Request("https://api.openai.com/v1/responses", data=body,
                       headers={"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"})

@@ -51,4 +51,6 @@ Cloud validation: core, planner, adapter, and voice transport tests use simulate
 
 ## Updating the prototype
 
+Version 0.1.3 fixes JSON-mode input validation for research extraction and desktop planning. It explicitly requests JSON in the input message, as required by the API. Thirty automated tests pass; authenticated end-to-end behavior still requires Windows testing.
+
 Close the agent, download the current repository ZIP from GitHub, extract into a new folder, and rerun Setup.cmd then Start.cmd. App memory remains in `%LOCALAPPDATA%\AppAgent`. Version 0.1.1 includes improved API compatibility and detailed error reporting; its 27 automated tests passed in the cloud.

@@ -7,6 +7,32 @@ from app_agent.research import CloudResearcher
 
 
 class CloudRequestTests(unittest.TestCase):
+    def test_json_mode_adds_json_instruction_to_input(self):
+        response = Mock()
+        response.read.return_value = b'{"status":"completed","output":[]}'
+        opener = Mock()
+        opener.open.return_value.__enter__ = Mock(return_value=response)
+        opener.open.return_value.__exit__ = Mock(return_value=False)
+        with patch("app_agent.research.build_opener", return_value=opener):
+            CloudResearcher(key="test-key").request(input='{"app":"Calculator"}', text={"format": {"type": "json_object"}})
+        payload = json.loads(opener.open.call_args.args[0].data)
+        self.assertIn("JSON", payload["input"])
+        self.assertIn('{"app":"Calculator"}', payload["input"])
+
+    def test_message_list_json_mode_preserves_original_messages(self):
+        response = Mock()
+        response.read.return_value = b'{"status":"completed","output":[]}'
+        opener = Mock()
+        opener.open.return_value.__enter__ = Mock(return_value=response)
+        opener.open.return_value.__exit__ = Mock(return_value=False)
+        messages = [{"role": "user", "content": "Extract capabilities"}]
+        with patch("app_agent.research.build_opener", return_value=opener):
+            CloudResearcher(key="test-key").request(input=messages, text={"format": {"type": "json_object"}})
+        payload = json.loads(opener.open.call_args.args[0].data)
+        self.assertIn("JSON", payload["input"][0]["content"])
+        self.assertEqual(payload["input"][1:], messages)
+        self.assertEqual(len(messages), 1)
+
     def test_pasted_logs_rejected_without_echoing_value(self):
         value = "No app blueprint found.\nError: secret-pasted-value"
         with self.assertRaises(RuntimeError) as raised:
