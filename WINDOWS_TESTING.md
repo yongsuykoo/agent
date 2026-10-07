@@ -64,3 +64,7 @@ Native Windows Edit controls now use a window- and process-checked Win32 adapter
 ### Exact text completion (0.3.3)
 
 The session log now prints the submitted Task command. Explicit `Type exactly:` and `Replace the document text with exactly:` commands require the whole observed editor value to match the requested text. A premature finish is rejected and replanned, with a bounded verification failure if it repeats. General tasks still use model-selected expected results and do not have this deterministic exact-text guarantee.
+
+### Windows setup test fix (0.3.4)
+
+Desktop adapter unit tests now mock the native-edit boundary on every platform so fake window handles cannot reach ctypes Windows APIs. Setup.cmd distinguishes Python environment creation, dependency installation, and test failures. All 74 tests pass in cloud, and all 11 adapter tests pass with the Windows platform branch simulated and native package imports blocked. Actual Windows Setup.cmd validation remains a local test.

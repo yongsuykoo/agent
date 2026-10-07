@@ -25,6 +25,11 @@ class DesktopAdapterTests(unittest.TestCase):
         text_actions(control, item)
         self.assertNotIn("type", item["actions"])
     def adapter(self, kind="Edit"):
+        # These are UIA unit tests, not real HWNDs. Mock the native boundary on
+        # every host; otherwise Windows passes Mock objects into ctypes.IsChild.
+        native_boundary = patch("app_agent.desktop.native_edit", return_value=None)
+        native_boundary.start()
+        self.addCleanup(native_boundary.stop)
         desktop = WindowsDesktop.__new__(WindowsDesktop)
         desktop.window = Mock()
         control = Mock()
