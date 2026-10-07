@@ -3,6 +3,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import re
 import socket
 from datetime import datetime, timezone
 from html.parser import HTMLParser
@@ -117,7 +118,23 @@ class CloudResearcher:
                     raise RuntimeError("Cloud response exceeds size limit.")
                 result = json.loads(raw)
         except HTTPError as error:
-            raise RuntimeError(f"Cloud research request failed (HTTP {error.code}); check model access, credentials, quota, and network settings.") from error
+            detail = ""
+            try:
+                provider_error = json.loads(error.read(8192)).get("error", {})
+                if isinstance(provider_error, dict):
+                    message = provider_error.get("message", "")
+                    parameter = provider_error.get("param")
+                    if isinstance(message, str):
+                        detail = message
+                    if isinstance(parameter, str):
+                        detail += f" [parameter: {parameter}]"
+            except (ValueError, OSError, AttributeError):
+                pass
+            # Error bodies can echo input. Never expose credentials in diagnostics.
+            detail = detail.replace(self.key, "[redacted]")
+            detail = re.sub(r"sk-[A-Za-z0-9_-]+", "[redacted]", detail)[:1000]
+            suffix = f": {detail}" if detail else "; the provider returned no readable error detail."
+            raise RuntimeError(f"Cloud request failed (HTTP {error.code}, model {self.model}){suffix}") from error
         except (URLError, TimeoutError) as error:
             raise RuntimeError("Cloud research connection failed; check network settings.") from error
         if result.get("status") != "completed":
@@ -126,7 +143,7 @@ class CloudResearcher:
 
     def find_sources(self, name, version):
         response = self.request(
-            tools=[{"type": "web_search"}], tool_choice="required", max_output_tokens=1500,
+            tools=[{"type": "web_search_preview"}], tool_choice="auto", max_output_tokens=1500,
             input=f"Find official user manuals, technical documentation, and help pages for {name}, version {version or 'unspecified'}. Cite actual pages. Prefer the publisher. Do not invent URLs.")
         urls = []
         for item in response.get("output", []):

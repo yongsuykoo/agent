@@ -42,8 +42,13 @@ The runner supports accessibility Invoke and Edit value patterns in one selected
 - UI cannot start: check Tcl/Tk was included in Python installation.
 - Missing microphone: enable Windows microphone access and select a working default input device. Chat remains available without audio.
 - Cloud HTTP 401/403: check API key validity and model access. HTTP 429: check quota/rate limits. `AGENT_MODEL` defaults to `gpt-4.1`; a replacement must support Responses API, web search, and JSON output.
+- Cloud HTTP 400: version 0.1.1 uses `web_search_preview` with automatic tool selection and reports the provider's message and rejected parameter. If it still fails, share that diagnostic text, never your API key. Live API compatibility cannot be confirmed without an authenticated request.
 - Documentation unavailable: check internet access and the publisher's site. CLI `research --source https://...` can select a public HTML/text manual explicitly.
 - Calculator not found: use Standard mode and a non-elevated interactive session. Close extra Calculator windows and rerun the test.
 - A task reports blocked/error: retain the session evidence locally, inspect the selected window, and try a supported control. Do not disable Windows security or run the agent as administrator to bypass inaccessible apps.
 
 Cloud validation: core, planner, adapter, and voice transport tests use simulated Windows/model/audio components. Public Calculator documentation retrieval was checked live. Actual Windows UI, microphone capture, global hotkey, and authenticated model requests require the Windows acceptance checks above.
+
+## Updating the prototype
+
+Close the agent, download the current repository ZIP from GitHub, extract into a new folder, and rerun Setup.cmd then Start.cmd. App memory remains in `%LOCALAPPDATA%\AppAgent`. Version 0.1.1 includes improved API compatibility and detailed error reporting; its 27 automated tests passed in the cloud.
