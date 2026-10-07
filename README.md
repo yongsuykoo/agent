@@ -1,6 +1,6 @@
 # Personal Windows app agent
 
-Version 0.4.5 includes automatic Windows self-testing. Click **Self-test** in the agent, or run `windows\SelfTest.cmd`: it runs native and AI checks, uses a disposable Notepad document, clears Calculator, and saves a report. No manual task entry is required. Cloud checks use the existing session API key and incur provider usage charges. See [WINDOWS_TESTING.md](WINDOWS_TESTING.md) for scope and reporting, [ADVANCED_LEARNING.md](ADVANCED_LEARNING.md) for controls and practice, and [LEARNING_RELEASE.md](LEARNING_RELEASE.md) for discovery and research behavior.
+Version 0.4.6 includes automatic Windows self-testing. Click **Self-test** in the agent, or run `windows\SelfTest.cmd`: it runs native and AI checks, uses a disposable Notepad document, clears Calculator, and saves a report. No manual task entry is required. Cloud checks use the existing session API key and incur provider usage charges. See [WINDOWS_TESTING.md](WINDOWS_TESTING.md) for scope and reporting, [ADVANCED_LEARNING.md](ADVANCED_LEARNING.md) for controls and practice, and [LEARNING_RELEASE.md](LEARNING_RELEASE.md) for discovery and research behavior.
 
 Goal: independently research unfamiliar applications, build evidence-backed operational blueprints, execute tasks, and troubleshoot failures through chat and voice.
 

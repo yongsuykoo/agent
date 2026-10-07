@@ -9,6 +9,12 @@ import time
 from .desktop import WindowsDesktop, foreground_window
 
 
+class CalculatorDetectionError(RuntimeError):
+    def __init__(self, message, details):
+        super().__init__(message)
+        self.details = details
+
+
 def doctor():
     report = {"platform": sys.platform, "python": sys.version.split()[0],
               "api_key_present": bool(os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")),
@@ -30,25 +36,61 @@ def calculator_smoke(cancel=None):
         raise RuntimeError("Calculator test stopped.")
     subprocess.Popen(["calc.exe"])
     desktop = None
-    deadline = time.monotonic() + 15
+    deadline = time.monotonic() + 45
+    candidates = {}
+    mode_attempted = set()
+    unrelated = set()
+    required = {"num2Button", "CalculatorResults", "equalButton", "plusButton", "minusButton", "divideButton"}
     while time.monotonic() < deadline:
         if cancel.is_set():
             raise RuntimeError("Calculator test stopped.")
-        for handle, title in WindowsDesktop.windows():
+        windows = sorted(WindowsDesktop.windows(), key=lambda item: item[1].casefold() != "calculator")
+        for handle, title in windows:
+            if cancel.is_set():
+                raise RuntimeError("Calculator test stopped.")
+            if handle in unrelated and title.casefold() != "calculator":
+                continue
             try:
                 candidate = WindowsDesktop(handle)
                 observation = candidate.observe()
-            except Exception:
+            except Exception as error:
+                if title.casefold() == "calculator":
+                    candidates[handle] = {"window_handle": handle, "accessibility_error": str(error)}
                 continue
-            ids = {control["automation_id"] for control in observation["controls"]}
-            if {"num2Button", "CalculatorResults", "equalButton", "plusButton", "minusButton", "divideButton"} <= ids:
+            ids = {control["automation_id"] for control in observation["controls"]
+                   if control.get("visible", True) and control.get("enabled", True)}
+            recognizable = {"num2Button", "CalculatorResults"} <= ids
+            if recognizable or title.casefold() == "calculator":
+                candidates[handle] = {"window_handle": handle, "control_count": len(observation["controls"]),
+                                      "control_limit_reached": len(observation["controls"]) >= 251,
+                                      "automation_ids": sorted(identity for identity in ids if identity),
+                                      "missing_required_ids": sorted(required - ids),
+                                      "standard_mode_attempted": handle in mode_attempted}
+            else:
+                unrelated.add(handle)
+            if required <= ids:
                 desktop = candidate
                 break
+            # Calculator can reopen in a converter or another non-arithmetic
+            # view. Alt+1 selects Standard; never send it to a browser or editor.
+            known_frame = title.casefold() == "calculator" and candidate.window.class_name() in {
+                "ApplicationFrameWindow", "Windows.UI.Core.CoreWindow", "WinUIDesktopWin32WindowClass"}
+            if (recognizable or known_frame) and handle not in mode_attempted:
+                candidate.window.set_focus()
+                if cancel.is_set() or foreground_window() != handle:
+                    candidates[handle]["mode_error"] = "Calculator did not receive foreground focus; no shortcut sent."
+                    continue
+                candidate.window.type_keys("%1", set_foreground=False)
+                mode_attempted.add(handle)
+                candidates[handle]["standard_mode_attempted"] = True
+                cancel.wait(0.25)
+                break  # Re-read this preferred Calculator after mode changes.
         if desktop:
             break
         cancel.wait(0.25)
     if desktop is None:
-        raise RuntimeError("Calculator standard controls not found. Open Calculator in Standard mode and retry.")
+        raise CalculatorDetectionError("Calculator arithmetic controls unavailable after startup and Standard-mode recovery. See recorded control diagnostics.",
+                                       {"calculator_candidates": list(candidates.values())[:8], "startup_timeout_seconds": 45})
 
     def press(automation_id):
         if cancel.is_set():

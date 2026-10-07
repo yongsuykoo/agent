@@ -48,6 +48,8 @@ def run_checks(checks, report_path, cancel, emit):
                 item = {"name": name, "status": "skipped", "reason": str(error)}
             except Exception as error:
                 item = {"name": name, "status": "failed", "error": str(error)}
+                if getattr(error, "details", None) is not None:
+                    item["details"] = error.details
         report["checks"].append(item)
         report["counts"] = {status: sum(c["status"] == status for c in report["checks"])
                             for status in ("passed", "failed", "skipped", "cancelled")}

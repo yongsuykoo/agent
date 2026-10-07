@@ -16,6 +16,16 @@ def snapshot(value="hello", handle=41, process=81, title="test"):
 
 
 class SelfTestTests(unittest.TestCase):
+    def test_failure_diagnostics_are_persisted_in_report(self):
+        from app_agent.windows_checks import CalculatorDetectionError
+        def fail():
+            raise CalculatorDetectionError("No arithmetic controls", {"calculator_candidates": []})
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "report.json"
+            report = run_checks([("Calculator", fail)], path, threading.Event(), lambda text: None)
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["checks"][0]["details"], {"calculator_candidates": []})
+        self.assertEqual(report["status"], "failed")
+
     def test_failed_and_skipped_checks_are_recorded_without_hiding_next_check(self):
         def fail():
             raise RuntimeError("Exact result differs")
