@@ -4,13 +4,25 @@ import base64
 import hashlib
 import io
 
-PATTERNS = {"invoke": 10031, "type": 10043, "select": 10036, "toggle": 10041,
-            "expand": 10028, "collapse": 10028, "scroll": 10034}
+# UIA_Is*PatternAvailable PROPERTY identifiers, not pattern identifiers.
+PATTERNS = {"invoke": 30031, "type": 30043, "select": 30036, "toggle": 30041,
+            "expand": 30028, "collapse": 30028, "scroll": 30034}
 CLICK_TYPES = {"Button", "MenuItem", "TabItem", "CheckBox", "RadioButton", "ListItem", "TreeItem", "Hyperlink", "Custom"}
 
 
 def literal_keys(text):
     return "".join("{" + character + "}" if character in "+^%~{}()" else character for character in text)
+
+
+def foreground_window():
+    """Read the foreground HWND through the actual, pointer-sized Win32 API."""
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    function = user32.GetForegroundWindow
+    function.argtypes = []
+    function.restype = wintypes.HWND
+    return function()
 
 
 def native_edit(control, parent):

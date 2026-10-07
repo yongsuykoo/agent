@@ -7,7 +7,7 @@ def calculator_app(app):
 
 
 def calculator_action(action, observation):
-    if action.get("kind") != "invoke":
+    if action.get("kind") not in ("invoke", "click"):
         return False
     controls = observation["controls"]
     ids = {control.get("automation_id") for control in controls}

@@ -12,7 +12,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 
-from .desktop import WindowsDesktop
+from .desktop import WindowsDesktop, foreground_window
 from .runner import TaskRunner
 from .practice_policy import calculator_action
 from .windows_checks import calculator_smoke, doctor
@@ -130,8 +130,7 @@ class NotepadFixture:
     def save(self):
         expected = editor(self.observe()).get("value")
         self.desktop.window.set_focus()
-        from pywinauto import win32functions
-        if self.cancel.is_set() or win32functions.GetForegroundWindow() != self.identity[0]:
+        if self.cancel.is_set() or foreground_window() != self.identity[0]:
             raise RuntimeError("Test window did not get foreground focus; no save shortcut sent.")
         # Save the already-created disposable file, never a user-selected path.
         self.desktop.window.type_keys("^s", set_foreground=False)
@@ -166,6 +165,7 @@ def self_test(data_dir, cloud=None, emit=print, cancel=None):
 
     def prerequisites():
         report = doctor()
+        report["api_key_present"] = cloud is not None or report.get("api_key_present", False)
         if report.get("desktop_error") or not report.get("visible_windows") or not all(report["dependencies"].values()):
             raise RuntimeError("Interactive desktop prerequisites missing: " + json.dumps(report))
         return report
@@ -203,7 +203,9 @@ def self_test(data_dir, cloud=None, emit=print, cancel=None):
             "Clear the current calculation. Calculate 17 plus 28 and verify the result is 45.", max_steps=14, effect_timeout=1)
         display = next(c["name"] for c in desktop.observe()["controls"] if c["automation_id"] == "CalculatorResults")
         if result["outcome"] != "result_observed" or re.findall(r"\d+", display)[-1:] != ["45"] or result["actions_executed"] < 1:
-            raise RuntimeError("Model-driven Calculator task did not execute and independently verify 45.")
+            last = next((entry.get("error") or entry.get("action", {}).get("reason") for entry in reversed(result["history"])
+                         if entry.get("error") or entry.get("action")), "No planner action")
+            raise RuntimeError(f"Model-driven Calculator failed: outcome={result['outcome']}, actions={result['actions_executed']}, display={display!r}, last step={last}. Full evidence: {run_dir / 'sessions.jsonl'}")
         return {"outcome": result["outcome"], "actions_executed": result["actions_executed"], "display": display}
 
     checks = [("runtime prerequisites", prerequisites), ("installed-app inventory", inventory),

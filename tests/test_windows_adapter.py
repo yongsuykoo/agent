@@ -1,9 +1,34 @@
 import unittest
 from unittest.mock import Mock, PropertyMock, patch
-from app_agent.desktop import WindowsDesktop, literal_keys, text_actions
+from app_agent.desktop import WindowsDesktop, foreground_window, literal_keys, text_actions
 
 
 class DesktopAdapterTests(unittest.TestCase):
+    def test_foreground_window_uses_user32_api_with_pointer_sized_result(self):
+        from ctypes import wintypes
+        user32 = Mock()
+        user32.GetForegroundWindow.return_value = 0x100000001
+        with patch("ctypes.WinDLL", return_value=user32, create=True) as library:
+            self.assertEqual(foreground_window(), 0x100000001)
+        library.assert_called_once_with("user32", use_last_error=True)
+        self.assertEqual(user32.GetForegroundWindow.argtypes, [])
+        self.assertIs(user32.GetForegroundWindow.restype, wintypes.HWND)
+
+    def test_invoke_capability_queries_uia_property_30031(self):
+        desktop, control = self.adapter("Button")
+        desktop.window.element_info.name = "Calculator"
+        desktop.window.element_info.control_type = "Window"
+        desktop.window.element_info.element.CurrentIsPassword = False
+        desktop.window.element_info.element.GetCurrentPropertyValue.return_value = False
+        desktop.window.descendants.return_value = [control]
+        control.element_info.name = "Two"
+        control.element_info.automation_id = "num2Button"
+        control.element_info.element.GetCurrentPropertyValue.side_effect = lambda identity: identity == 30031
+        item = desktop.observe()["controls"][1]
+        self.assertIn("invoke", item["actions"])
+        control.element_info.element.GetCurrentPropertyValue.assert_any_call(30031)
+        self.assertNotIn(10031, [call.args[0] for call in control.element_info.element.GetCurrentPropertyValue.call_args_list])
+
     def test_keyboard_fallback_escapes_literal_shortcut_characters(self):
         self.assertEqual(literal_keys("a+b^c%{x}"), "a{+}b{^}c{%}{{}x{}}")
 

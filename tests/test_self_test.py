@@ -91,7 +91,7 @@ class SelfTestTests(unittest.TestCase):
         functions = types.SimpleNamespace(GetForegroundWindow=lambda: 999)
         package = types.ModuleType("pywinauto")
         package.win32functions = functions
-        with tempfile.TemporaryDirectory() as directory, patch.dict("sys.modules", {"pywinauto": package}):
+        with tempfile.TemporaryDirectory() as directory, patch("app_agent.self_test.foreground_window", return_value=999):
             fixture = self.fixture(directory)
             with self.assertRaises(RuntimeError):
                 fixture.save()
@@ -100,7 +100,7 @@ class SelfTestTests(unittest.TestCase):
     def test_save_verifies_disk_not_model_claim(self):
         package = types.ModuleType("pywinauto")
         package.win32functions = types.SimpleNamespace(GetForegroundWindow=lambda: 41)
-        with tempfile.TemporaryDirectory() as directory, patch.dict("sys.modules", {"pywinauto": package}):
+        with tempfile.TemporaryDirectory() as directory, patch("app_agent.self_test.foreground_window", return_value=41):
             fixture = self.fixture(directory)
             fixture.path.write_text("hello", encoding="utf-8")
             result = fixture.save()
@@ -165,7 +165,7 @@ class SelfTestTests(unittest.TestCase):
         calculator = Desktop("Calculator", calculator=True)
         with tempfile.TemporaryDirectory() as directory, \
              patch("app_agent.self_test.sys.platform", "win32"), \
-             patch.dict("sys.modules", {"pywinauto": package}), \
+             patch("app_agent.self_test.foreground_window", return_value=41), \
              patch("app_agent.self_test.doctor", return_value={"visible_windows": 1, "dependencies": {"pywinauto": True}}), \
              patch("app_agent.self_test.scan_apps", return_value=inventory_snapshot([app()])), \
              patch("app_agent.self_test.calculator_smoke", return_value={"passed": 3}), \

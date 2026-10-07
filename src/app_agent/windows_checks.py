@@ -6,7 +6,7 @@ import subprocess
 import sys
 import threading
 import time
-from .desktop import WindowsDesktop
+from .desktop import WindowsDesktop, foreground_window
 
 
 def doctor():
@@ -41,7 +41,7 @@ def calculator_smoke(cancel=None):
             except Exception:
                 continue
             ids = {control["automation_id"] for control in observation["controls"]}
-            if {"num2Button", "CalculatorResults", "clearButton"} <= ids:
+            if {"num2Button", "CalculatorResults", "equalButton", "plusButton", "minusButton", "divideButton"} <= ids:
                 desktop = candidate
                 break
         if desktop:
@@ -57,14 +57,27 @@ def calculator_smoke(cancel=None):
         matches = [control for control in observation["controls"] if control["automation_id"] == automation_id]
         if len(matches) != 1:
             raise RuntimeError(f"Calculator control unavailable: {automation_id}")
-        desktop.act({"kind": "invoke", "target": matches[0]["id"]})
+        target = matches[0]
+        kind = next((kind for kind in ("invoke", "click") if kind in target.get("actions", [])), None)
+        if kind is None:
+            raise RuntimeError(f"Calculator button exposes no supported action: {automation_id}")
+        desktop.act({"kind": kind, "target": target["id"]})
         cancel.wait(0.15)
 
     checks = []
     for sequence, expected in ((["num2Button", "num3Button", "plusButton", "num1Button", "num9Button", "equalButton"], "42"),
                                (["num8Button", "divideButton", "num2Button", "equalButton"], "4"),
                                (["num9Button", "minusButton", "num3Button", "equalButton"], "6")):
-        press("clearButton")
+        ids = {control["automation_id"] for control in desktop.observe()["controls"]}
+        if "clearButton" in ids:
+            press("clearButton")
+        else:
+            # Esc is Calculator's clear-all shortcut. Send only to its window.
+            desktop.window.set_focus()
+            if cancel.is_set() or foreground_window() != desktop.window.handle:
+                raise RuntimeError("Calculator did not receive focus; no clear shortcut sent.")
+            desktop.window.type_keys("{ESC}", set_foreground=False)
+            cancel.wait(0.15)
         for button in sequence:
             press(button)
         observation = desktop.observe()

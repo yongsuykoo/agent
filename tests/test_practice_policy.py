@@ -12,8 +12,10 @@ class PracticePolicyTests(unittest.TestCase):
 
     def test_only_mathematical_calculator_controls_are_allowed(self):
         self.assertTrue(calculator_action({"kind": "invoke", "target": 4}, self.observation("plusButton")))
+        self.assertTrue(calculator_action({"kind": "click", "target": 4}, self.observation("plusButton")))
         for identity in ("Close", "ClearMemoryButton", "TogglePaneButton", "unknown"):
             self.assertFalse(calculator_action({"kind": "invoke", "target": 4}, self.observation(identity)))
+            self.assertFalse(calculator_action({"kind": "click", "target": 4}, self.observation(identity)))
         self.assertFalse(calculator_action({"kind": "type", "target": 4}, self.observation()))
 
     def test_other_apps_cannot_claim_calculator_permission(self):

@@ -85,3 +85,7 @@ Close App Agent before setup. Setup reuses an existing Python environment instea
 ### Windows fixture newline fix (0.4.2)
 
 The simulated Notepad save now writes literal line endings instead of asking Python to translate already-present CRLF sequences. The Windows failure was reproduced in cloud with Windows newline translation before the fix. All 86 tests pass afterwards, including an explicit regression that runs the complete simulated self-test suite under Windows newline translation. Live desktop results are still reported separately by Self-test.
+
+### Windows report fixes (0.4.3)
+
+The received live Windows report showed 9 passed and 3 failed checks: inventory, native Notepad editing, and both AI Notepad edits passed; Calculator native detection, Notepad save, and AI Calculator verification failed. The save check now calls the pointer-sized user32 GetForegroundWindow API directly. UIA pattern-availability probes use the correct 300xx property identifiers. The Calculator sandbox permits accessible clicks on the same arithmetic-only control allowlist. Native calculations no longer require clearButton: a focus-checked Escape clears Calculator when that ID is absent. AI calculation failures now include outcome, action count, display text and last step, with full session evidence retained. The API-key-present flag accounts for a key entered directly into the CLI client. All 90 cloud regression tests pass; the revised live Windows checks remain to be run.
