@@ -1,5 +1,9 @@
 # Personal Windows app agent
 
+Version **0.6.0** adds a locally launched Windows connection companion. Run `windows\Connect.cmd` after setup, then share its full public pairing link with the cloud controller. It supports automatic tests/research and tasks limited to locally granted app controls. Requests are authenticated and results encrypted; your provider key stays on Windows. See [WINDOWS_CONNECTION.md](WINDOWS_CONNECTION.md). Publishing the companion does not establish a live connection or 80% completion; [GOAL_MILESTONES.md](GOAL_MILESTONES.md) defines the remaining acceptance evidence.
+
+Release 0.6.0 cloud validation: 147 regression tests pass, including actual cryptographic operations, an authenticated loopback HTTP job exchange, queue/cancellation checks, and a simulated locally granted editor task. Actual WinGet/relay/Windows-desktop pairing is pending.
+
 Version 0.5.0 adds **Learn all apps**: persistent batch documentation research, follow-up technical-manual study, and experiments for individual capabilities. The agent designs its own tasks, retains failures for retry, and measures execution evidence separately from documentation. Research runs separately from desktop automation so chat tasks can start while research is pending. See [AUTONOMOUS_LEARNING.md](AUTONOMOUS_LEARNING.md) for starting the campaign, budgets, and remaining gaps.
 
 Automatic Windows self-testing remains available: click **Self-test**, or run `windows\SelfTest.cmd`. It operates a disposable Notepad document and Calculator and saves a report without manual task entry. The new thirteenth check researches Notepad documentation, designs its own experiment and verifies execution through the persistent queue. Cloud checks and learning use the session API key and incur provider usage charges. See [WINDOWS_TESTING.md](WINDOWS_TESTING.md) for reporting and [ADVANCED_LEARNING.md](ADVANCED_LEARNING.md) for control permissions.
@@ -19,7 +23,7 @@ Python 3.11 or later:
 ```sh
 python -m venv .venv
 # Windows PowerShell:
-.venv\Scripts\python.exe -m pip install -e .
+.venv\Scripts\python.exe -m pip install -e ".[bridge]"
 .venv\Scripts\app-agent.exe discover
 .venv\Scripts\app-agent.exe blueprint Calculator --create
 .venv\Scripts\app-agent.exe blueprint Calculator

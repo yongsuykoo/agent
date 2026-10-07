@@ -23,9 +23,9 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install core package
         if: runner.os != 'Windows'
-        run: python -m pip install -e .
+        run: python -m pip install -e ".[bridge]"
       - name: Install Windows package and dependencies
         if: runner.os == 'Windows'
-        run: python -m pip install -e ".[windows]"
+        run: python -m pip install -e ".[windows,bridge]"
       - name: Run simulated regression tests
         run: python -m unittest discover -s tests -v

@@ -4,7 +4,7 @@ The goal is to discover software, study it without demonstrations, and learn to 
 
 ## Start on Windows
 
-1. Close the old agent. Download the GitHub ZIP, extract into a new folder, run `windows\Setup.cmd`, then `windows\Start.cmd`. Confirm **0.5.0** in the title. Existing memory under `%LOCALAPPDATA%\AppAgent` is retained.
+1. Close the old agent. Download the GitHub ZIP, extract into a new folder, run `windows\Setup.cmd`, then `windows\Start.cmd`. Confirm **0.6.0** in the current title. Existing memory under `%LOCALAPPDATA%\AppAgent` is retained. For cloud-directed testing instead, see [WINDOWS_CONNECTION.md](WINDOWS_CONNECTION.md) and start Connect.cmd with the normal agent closed.
 2. Enter your API key in the masked startup prompt. Click **Learn all apps**, then leave the agent open. This enables up to **50 app research attempts and 50 experiment designs per local day**. These use paid provider calls; one app study can make several calls. Lower the visible Daily app limit and click **Apply / resume** to reduce both budgets. Failed requests count.
 3. Enable **Auto-practice Calculator** and accept its scope for arithmetic experiments. For another app, open disposable data, select the app in **Apps & knowledge**, and use **Grant practice on specific controls…**. This is permission; you do not teach a procedure or supply a task. The agent designs experiments from documentation.
 4. Background practice uses these permissions and shares **three attempts per local day across apps**, with at most 24 planning steps per attempt. **Practice app** can also run a prepared experiment with task/step approval; manual practice is separate from that background budget.

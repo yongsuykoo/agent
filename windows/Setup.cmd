@@ -7,7 +7,7 @@ if errorlevel 1 goto python_fail
 :install
 .venv\Scripts\python.exe -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)"
 if errorlevel 1 goto python_fail
-.venv\Scripts\python.exe -m pip install -e ".[windows]"
+.venv\Scripts\python.exe -m pip install -e ".[windows,bridge]"
 if errorlevel 1 goto dependencies_fail
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 if errorlevel 1 goto tests_fail

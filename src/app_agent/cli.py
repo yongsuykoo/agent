@@ -16,6 +16,8 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("discover", help="Read installed Windows application metadata")
     commands.add_parser("ui", help="Launch Windows chat and push-to-talk interface")
+    connection = commands.add_parser("connect", help="Start the interactive Windows connection helper")
+    connection.add_argument("--controller-key", required=True, type=Path, help="Pinned controller PUBLIC key file")
     commands.add_parser("doctor", help="Check runtime prerequisites without revealing credentials")
     commands.add_parser("windows-smoke", help="Open Calculator and test three calculations; clears its current calculation")
     automatic = commands.add_parser("self-test", help="Automatically test Windows inventory, Calculator and disposable Notepad; save a report")
@@ -39,6 +41,10 @@ def main():
     research.add_argument("--source", action="append", help="Optional documentation HTTPS URL; repeat up to five times")
     args = parser.parse_args()
     try:
+        if args.command == "connect":
+            from .remote_ui import launch_connection
+            launch_connection(args.data_dir, args.controller_key)
+            return
         if args.command == "ui":
             from .ui import launch
             launch(args.data_dir)
