@@ -13,6 +13,45 @@ def literal_keys(text):
     return "".join("{" + character + "}" if character in "+^%~{}()" else character for character in text)
 
 
+def text_readonly(control):
+    try:
+        value = control.iface_value.CurrentIsReadOnly
+        if type(value) in (bool, int):
+            return bool(value)
+    except Exception:
+        pass
+    try:
+        value = control.iface_text.DocumentRange.GetAttributeValue(40015)
+        if type(value) in (bool, int) and value in (0, 1):
+            return bool(value)
+    except Exception:
+        pass
+    if sys.platform == "win32" and control.element_info.class_name == "Edit" and control.handle:
+        import ctypes
+        from ctypes import wintypes
+        get_style = ctypes.windll.user32.GetWindowLongW
+        get_style.argtypes = [wintypes.HWND, ctypes.c_int]
+        get_style.restype = ctypes.c_long
+        return bool(get_style(control.handle, -16) & 0x0800)
+    return None
+
+
+def text_actions(control, item):
+    if item["type"] not in ("Edit", "Document", "ComboBox") or item["password"]:
+        return
+    try:
+        item["value"] = str(control.iface_value.CurrentValue)[:2000]
+    except Exception:
+        try:
+            item["value"] = control.iface_text.DocumentRange.GetText(2000)
+        except Exception:
+            pass
+    item["readonly"] = text_readonly(control)
+    item["actions"] = [action for action in item["actions"] if action != "type"]
+    if item["readonly"] is False:
+        item["actions"].append("type")
+
+
 class WindowsDesktop:
     def __init__(self, handle):
         if sys.platform != "win32":
@@ -55,19 +94,13 @@ class WindowsDesktop:
                 try:
                     element = info.element
                     item["password"] = bool(element.CurrentIsPassword)
-                    item["actions"] = [name for name, property_id in PATTERNS.items() if element.GetCurrentPropertyValue(property_id)]
-                    if "type" in item["actions"] and not item["password"]:
-                        item["value"] = str(control.iface_value.CurrentValue)[:2000]
-                        if control.iface_value.CurrentIsReadOnly:
-                            item["actions"].remove("type")
-                    elif info.control_type == "Document" and not item["password"]:
+                    for name, property_id in PATTERNS.items():
                         try:
-                            item["value"] = control.iface_text.DocumentRange.GetText(2000)
-                            readonly = control.iface_text.DocumentRange.GetAttributeValue(40015)
-                            if readonly is False or type(readonly) is int and readonly == 0:
-                                item["actions"].append("type")
+                            if element.GetCurrentPropertyValue(property_id):
+                                item["actions"].append(name)
                         except Exception:
-                            pass
+                            continue
+                    text_actions(control, item)
                     if "toggle" in item["actions"]:
                         item["state"]["toggle"] = int(control.iface_toggle.CurrentToggleState)
                     if "expand" in item["actions"]:
@@ -116,9 +149,9 @@ class WindowsDesktop:
         if action["kind"] == "invoke":
             control.invoke()
         elif action["kind"] == "type":
-            if control.element_info.control_type == "Edit":
-                control.set_edit_text(action["text"])
-            elif control.element_info.control_type in ("Document", "ComboBox"):
+            if control.element_info.control_type in ("Edit", "Document", "ComboBox"):
+                if text_readonly(control) is not False:
+                    raise ValueError("Text target is read-only or its editability is unknown.")
                 try:
                     value = control.iface_value
                 except Exception:
@@ -126,12 +159,14 @@ class WindowsDesktop:
                 if value is not None:
                     if value.CurrentIsReadOnly:
                         raise ValueError("Cannot edit a read-only control.")
-                    value.SetValue(action["text"])
-                elif control.element_info.control_type == "Document":
-                    readonly = control.iface_text.DocumentRange.GetAttributeValue(40015)
-                    if not (readonly is False or type(readonly) is int and readonly == 0):
-                        raise ValueError("Document is read-only or its editability is unknown.")
+                    if control.element_info.control_type == "Edit":
+                        control.set_edit_text(action["text"])
+                    else:
+                        value.SetValue(action["text"])
+                elif control.element_info.control_type in ("Edit", "Document"):
                     control.set_focus()
+                    if not control.element_info.element.CurrentHasKeyboardFocus:
+                        raise RuntimeError("Text target did not receive focus; no keyboard input sent.")
                     from pywinauto.keyboard import send_keys
                     send_keys("^a")
                     send_keys(literal_keys(action["text"]), with_spaces=True, with_newlines=True, with_tabs=True)

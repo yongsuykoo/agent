@@ -1,17 +1,36 @@
 import unittest
-from unittest.mock import Mock
-from app_agent.desktop import WindowsDesktop, literal_keys
+from unittest.mock import Mock, PropertyMock, patch
+from app_agent.desktop import WindowsDesktop, literal_keys, text_actions
 
 
 class DesktopAdapterTests(unittest.TestCase):
     def test_keyboard_fallback_escapes_literal_shortcut_characters(self):
         self.assertEqual(literal_keys("a+b^c%{x}"), "a{+}b{^}c{%}{{}x{}}")
+
+    def test_text_pattern_readonly_attribute_advertises_document_input(self):
+        control = Mock()
+        type(control).iface_value = PropertyMock(side_effect=RuntimeError("No Value pattern"))
+        control.iface_text.DocumentRange.GetAttributeValue.return_value = False
+        control.iface_text.DocumentRange.GetText.return_value = "sample"
+        item = {"type": "Document", "password": False, "actions": [], "value": ""}
+        text_actions(control, item)
+        self.assertEqual(item["actions"], ["type"])
+        self.assertEqual(item["value"], "sample")
+
+    def test_readonly_document_does_not_advertise_input(self):
+        control = Mock()
+        type(control).iface_value = PropertyMock(side_effect=RuntimeError("No Value pattern"))
+        control.iface_text.DocumentRange.GetAttributeValue.return_value = True
+        item = {"type": "Document", "password": False, "actions": [], "value": ""}
+        text_actions(control, item)
+        self.assertNotIn("type", item["actions"])
     def adapter(self, kind="Edit"):
         desktop = WindowsDesktop.__new__(WindowsDesktop)
         desktop.window = Mock()
         control = Mock()
         control.element_info.control_type = kind
         control.element_info.element.CurrentIsPassword = False
+        control.iface_value.CurrentIsReadOnly = False
         control.is_visible.return_value = True
         control.is_enabled.return_value = True
         desktop.controls = [desktop.window, control]

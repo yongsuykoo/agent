@@ -1,5 +1,7 @@
 # Version 0.3.0: wider app controls and independent practice
 
+Update 0.3.1 adds independent pattern probing, editable text detection for Notepad-style controls, and bounded replanning after an unsupported proposed action. No rejected action is executed. When a keyboard fallback is needed, read-only status and actual control focus must be confirmed first. The specific failing Windows control still needs Inspect window output to diagnose fully.
+
 The previous Windows run demonstrated autonomous Calculator practice. This release extends the architecture to unfamiliar apps. It does not claim that every app is now fully understood or supported.
 
 ## New capabilities

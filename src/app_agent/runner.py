@@ -28,7 +28,7 @@ def validate_action(action, observation):
         if control.get("password"):
             raise ValueError("Password controls cannot be automated.")
         if "actions" in control and kind not in control["actions"]:
-            raise ValueError("Control does not expose the requested action.")
+            raise ValueError(f"Control {control['id']} ({control['type']}, {control['name']!r}) cannot {kind}; available actions: {', '.join(control['actions']) or 'none'}.")
     if kind == "type" and (not isinstance(action.get("text"), str) or len(action["text"]) > 2000):
         raise ValueError("Invalid text entry.")
     if kind == "finish" and (not isinstance(action.get("expected_text"), str) or not action["expected_text"].strip()):
@@ -99,7 +99,17 @@ class TaskRunner:
                 if self.cancel.is_set():
                     outcome = "cancelled"
                     break
-                action = validate_action(json.loads(output_text(response)), observation)
+                proposed = json.loads(output_text(response))
+                try:
+                    action = validate_action(proposed, observation)
+                except ValueError as error:
+                    failures += 1
+                    history.append({"observation": observation, "action": proposed, "execution": "rejected_invalid_action", "error": str(error)})
+                    self.emit(f"Proposed action rejected without execution; replanning: {error}")
+                    if failures >= 3:
+                        outcome = "recovery_limit"
+                        break
+                    continue
                 entry = {"observation": observation, "action": action, "execution": "not_executed"}
                 history.append(entry)
                 self.emit(action["reason"])

@@ -6,6 +6,19 @@ from test_runner import FakeDesktop, FakeCloud, observation
 
 
 class RecoveryTests(unittest.TestCase):
+    def test_unsupported_action_replans_to_advertised_text_entry(self):
+        class Desktop(FakeDesktop):
+            def observe(self):
+                return {"window": "Untitled - Notepad", "controls": [{"id": 1, "name": "Text Editor", "type": "Edit", "automation_id": "editor", "enabled": True, "visible": True, "actions": ["type"], "value": "Hello" if self.actions else ""}]}
+        cloud = FakeCloud([{"kind": "invoke", "target": 1, "reason": "Wrong pattern"},
+                           {"kind": "type", "target": 1, "text": "Hello", "reason": "Use advertised text action"},
+                           {"kind": "finish", "expected_text": "Hello", "reason": "Text present"}])
+        result = self.execute(Desktop(), cloud)
+        self.assertEqual(result["outcome"], "result_observed")
+        self.assertEqual(result["actions_executed"], 1)
+        self.assertEqual(result["history"][0]["execution"], "rejected_invalid_action")
+        self.assertIn("available actions: type", result["history"][0]["error"])
+
     def execute(self, desktop, cloud, **kwargs):
         with tempfile.TemporaryDirectory() as directory:
             return TaskRunner(desktop, cloud, lambda action, obs: True, lambda text: None, directory).run("Calculate", effect_timeout=0, **kwargs)
