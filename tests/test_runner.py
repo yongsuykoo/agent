@@ -3,7 +3,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from app_agent.runner import TaskRunner, validate_action
+from app_agent.runner import TaskRunner, validate_action, reconcile_action
 
 
 def observation(name="Add", enabled=True):
@@ -39,6 +39,34 @@ class RunnerTests(unittest.TestCase):
         result, desktop = self.execute([{"kind": "invoke", "target": 1, "reason": "Add"}, {"kind": "finish", "expected_text": "42", "reason": "Result"}])
         self.assertEqual(result["outcome"], "result_observed")
         self.assertEqual(len(desktop.actions), 1)
+        self.assertEqual(result["actions_executed"], 1)
+        self.assertEqual(result["history"][0]["execution"], "executed")
+
+    def test_control_reordering_remaps_approved_target(self):
+        before = observation()
+        after = observation()
+        after["controls"][0]["id"] = 5
+        action = {"kind": "invoke", "target": 1, "reason": "Add"}
+        self.assertEqual(reconcile_action(action, before, after)["target"], 5)
+
+    def test_unrelated_button_visibility_change_is_tolerated(self):
+        before = observation()
+        before["controls"].append({"id": 2, "name": "Minimize", "type": "Button", "automation_id": "min", "enabled": True, "visible": True})
+        after = json.loads(json.dumps(before))
+        after["controls"][1]["visible"] = False
+        action = {"kind": "invoke", "target": 1, "reason": "Add"}
+        self.assertEqual(reconcile_action(action, before, after), action)
+
+    def test_result_changes_and_duplicate_targets_block_approval(self):
+        before = observation()
+        before["controls"].append({"id": 2, "name": "0", "type": "Text", "automation_id": "result", "enabled": True, "visible": True})
+        after = json.loads(json.dumps(before))
+        after["controls"][1]["name"] = "23"
+        action = {"kind": "invoke", "target": 1, "reason": "Add"}
+        self.assertIsNone(reconcile_action(action, before, after))
+        duplicate = json.loads(json.dumps(before))
+        duplicate["controls"].append({**duplicate["controls"][0], "id": 3})
+        self.assertIsNone(reconcile_action(action, before, duplicate))
 
     def test_rejection_prevents_action(self):
         result, desktop = self.execute([{"kind": "invoke", "target": 1, "reason": "Add"}], approve=lambda action, obs: False)
