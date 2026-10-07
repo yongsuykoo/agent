@@ -77,3 +77,7 @@ The suite checks runtime prerequisites, installed-app inventory, three Calculato
 Every run saves `report.json` and model task session evidence under its own timestamped directory. Each check reports passed, failed, skipped, or cancelled. Missing cloud credentials produce skipped checks and an overall partial result. Failures do not prevent independent checks from running. These checks verify the named operations only; they do not certify every installed application's capabilities. No screenshot upload is used by this suite.
 
 `windows\Test.cmd` runs the core regression tests and the native self-test without requesting a cloud key. GitHub Actions is configured to run simulated regression tests on Windows and Linux with Python 3.11 and 3.14. Hosted regression jobs do not run the interactive Windows suite or call a live model. A configured workflow is not evidence of a passed CI run.
+
+### Updating an existing installation (0.4.1)
+
+Close App Agent before setup. Setup reuses an existing Python environment instead of copying its running executable again. Start scripts launch the Python module directly so the console launcher app-agent.exe is not held open by the agent. An earlier failed pip uninstall may leave invalid-distribution warnings; extract into a fresh folder to recover without deleting the old installation or its data. A WinError 5 alone does not establish a need to run as administrator.
