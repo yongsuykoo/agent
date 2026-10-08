@@ -6,6 +6,8 @@ from importlib.metadata import version
 import json
 from pathlib import Path
 import re
+import socket
+import sys
 import threading
 import time
 import uuid
@@ -247,9 +249,20 @@ def make_server(session, port=0):
             self.end_headers()
             self.wfile.write(body)
     class BoundedServer(ThreadingHTTPServer):
+        # HTTPServer permits address reuse, which can admit a second listener
+        # on Windows. Python versions may also enable port reuse by default.
+        # This endpoint must belong to exactly one helper session.
+        allow_reuse_address = False
+        allow_reuse_port = False
+
         def __init__(self, *args):
             self.slots = threading.BoundedSemaphore(8)
             super().__init__(*args)
+
+        def server_bind(self):
+            if sys.platform == "win32":
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            super().server_bind()
 
         def process_request(self, request, client_address):
             if not self.slots.acquire(blocking=False):

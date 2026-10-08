@@ -1,4 +1,4 @@
-# Connect through agent.papaprint.store — 0.6.4
+# Connect through agent.papaprint.store — 0.6.5
 
 This uses a dedicated hostname in your Cloudflare account. It gives you control over that hostname's routing and security settings. It does not guarantee that the cloud connection will succeed: the controller must receive and authenticate the helper's response before any Windows tests begin.
 
@@ -25,7 +25,7 @@ The full hostname is **agent.papaprint.store**. The origin is **http://127.0.0.1
 ## 2. Start the updated Windows helper
 
 1. Close the old App Agent and connection helper. Download the [Windows test kit](downloads/app-agent-windows-test-kit.zip), extract it into a **new folder**, and run `windows\Setup.cmd` inside that folder.
-2. Run **`windows\ConnectNamed.cmd`**. It opens App Agent connection **0.6.4**, with named mode enabled and **agent.papaprint.store** filled in.
+2. Run **`windows\ConnectNamed.cmd`**. It opens App Agent connection **0.6.5**, with named mode enabled and **agent.papaprint.store** filled in.
 3. Paste the token or copied installation command into the **Cloudflare tunnel token** masked field. It is used only in the cloudflared child process environment; it is not saved to a file or placed in the process command line. The helper's diagnostic output redacts it.
 4. Leave automatic Windows tests enabled. AI tests and documentation research are optional: enter your OpenAI API key in the separate local masked field and enable the AI option when wanted. They incur provider usage charges.
 5. Click **Start connection** and accept its scope prompt. Leave the helper open. After registration, click **Copy connection diagnostics** and send the copied report to the testing chat. It includes the public pairing link; it contains no tunnel token or provider key.
@@ -59,4 +59,4 @@ An interactive Cloudflare Access login page also prevents the current machine cl
 
 ## What has been tested
 
-The 0.6.4 cloud suite passes **174 tests**. It exercises real signatures, encryption and loopback HTTP exchanges, exact custom-host selection, masked-field input parsing, token placement in the child environment, and refusal to use another port when the fixed port is occupied. The custom-host HTTPS transport and native Windows automation in this suite are simulated. Live Cloudflare routing, Windows connector startup and authenticated cloud-to-Windows testing remain to be verified. No claim of universal app mastery or 80% completion follows from these checks.
+The 0.6.5 cloud suite passes **176 tests**. It exercises real signatures, encryption and loopback HTTP exchanges, exact custom-host selection, masked-field input parsing, token placement in the child environment, refusal to use another port when the fixed port is occupied, and the Windows exclusive-bind path and cleanup on failure. The custom-host HTTPS transport, Windows socket-option checks and native Windows automation in this suite are simulated. The uploaded 0.6.4 Windows setup log passed 173 tests but exposed the occupied-port failure corrected in 0.6.5; the corrected setup still needs Windows confirmation. Live Cloudflare routing, Windows connector startup and authenticated cloud-to-Windows testing remain to be verified. No claim of universal app mastery or 80% completion follows from these checks.

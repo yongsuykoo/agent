@@ -188,6 +188,43 @@ class JobPolicyTests(unittest.TestCase):
         self.assertIn("Native execution failed", result["error"])
 
 
+class SocketBindingTests(unittest.TestCase):
+    def test_windows_exclusivity_is_set_before_binding_without_address_or_port_reuse(self):
+        from app_agent import remote_bridge
+        events = []
+        listener = Mock()
+        listener.getsockname.return_value = ("127.0.0.1", 8765)
+        listener.setsockopt.side_effect = lambda *args: events.append(("option", args))
+        listener.bind.side_effect = lambda *args: events.append(("bind", args))
+        exclusive = getattr(remote_bridge.socket, "SO_EXCLUSIVEADDRUSE", -5)
+        with patch("app_agent.remote_bridge.sys.platform", "win32"), \
+             patch("app_agent.remote_bridge.socket.SO_EXCLUSIVEADDRUSE", exclusive, create=True), \
+             patch("app_agent.remote_bridge.socket.socket", return_value=listener):
+            server = make_server(Mock(), port=8765)
+            try:
+                self.assertFalse(server.allow_reuse_address)
+                self.assertFalse(server.allow_reuse_port)
+                self.assertEqual(events, [
+                    ("option", (remote_bridge.socket.SOL_SOCKET, exclusive, 1)),
+                    ("bind", (("127.0.0.1", 8765),))])
+                listener.listen.assert_called_once()
+            finally:
+                server.server_close()
+        listener.close.assert_called_once()
+
+    def test_failed_windows_exclusivity_closes_socket_without_binding_or_fallback(self):
+        listener = Mock()
+        listener.setsockopt.side_effect = OSError("Exclusive binding unavailable")
+        with patch("app_agent.remote_bridge.sys.platform", "win32"), \
+             patch("app_agent.remote_bridge.socket.SO_EXCLUSIVEADDRUSE", -5, create=True), \
+             patch("app_agent.remote_bridge.socket.socket", return_value=listener):
+            with self.assertRaisesRegex(OSError, "Exclusive binding unavailable"):
+                make_server(Mock(), port=8765)
+        listener.bind.assert_not_called()
+        listener.listen.assert_not_called()
+        listener.close.assert_called_once()
+
+
 class ConnectionIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.keys = ControllerKeys()

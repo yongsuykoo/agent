@@ -1,4 +1,4 @@
-# Connect the Windows desktop to the cloud — 0.6.4
+# Connect the Windows desktop to the cloud — 0.6.5
 
 This companion makes a temporary outbound connection from your logged-in Windows desktop. The cloud controller can then inspect apps/windows, run the automatic self-test, research apps, and request tasks in locally granted controls. It is not a desktop video stream or a remote shell.
 
@@ -6,7 +6,7 @@ This companion makes a temporary outbound connection from your logged-in Windows
 
 1. Close the old App Agent. Download the current repository ZIP and extract into a fresh folder. Run `windows\Setup.cmd`.
 2. For your own hostname, follow [NAMED_TUNNEL_SETUP.md](NAMED_TUNNEL_SETUP.md) and double-click **`windows\ConnectNamed.cmd`**. For a temporary Quick Tunnel, use **`windows\Connect.cmd`**. Both launch through Python, so PowerShell script execution is not required and its execution policy is unchanged. They install Cloudflare's `cloudflared` through WinGet when missing; WinGet's integrity checks remain enabled. No inbound firewall rule or router port-forward is created. Windows may require approval to install the package. If WinGet is unavailable, install cloudflared using the official Cloudflare Windows instructions and retry.
-3. In **App Agent connection — 0.6.4**, leave automatic tests enabled. Named mode also requires your hostname and the tunnel token entered in its masked local field. For live model tests/research, enter your OpenAI API key locally and enable the AI option. It incurs provider charges. Enable cloud app tasks if you want the controller to operate other disposable app windows after local grants.
+3. In **App Agent connection — 0.6.5**, leave automatic tests enabled. Named mode also requires your hostname and the tunnel token entered in its masked local field. For live model tests/research, enter your OpenAI API key locally and enable the AI option. It incurs provider charges. Enable cloud app tasks if you want the controller to operate other disposable app windows after local grants.
 4. Click **Start connection** and accept the displayed scope. The helper checks its local HTTP server and waits for Cloudflare to log a registered transport connection before displaying the link. Copy the **entire pairing link** and send it to this chat. The link contains the temporary relay address and the Windows session's public verification key. It contains no API key, password, or private key. Relay registration alone does not prove cloud reachability; the controller must authenticate the `/info` response.
 5. Leave the helper open and the desktop unlocked. The controller can now submit jobs and read encrypted results directly. You do not enter test commands or upload reports manually. Native tests clear Calculator and operate their own disposable Notepad document; avoid touching the desktop while they run.
 
@@ -21,6 +21,8 @@ Click **Copy connection diagnostics** and paste the report into the testing chat
 Cloudflared parses configuration-file routing before its CLI origin ([official source](https://github.com/cloudflare/cloudflared/blob/master/ingress/ingress.go)). The helper passes its own temporary empty YAML configuration, excluding inherited tunnel settings from that child process. Quick mode selects its loopback `--url`; named mode selects its account-managed tunnel using the locally entered token. Named mode binds only `127.0.0.1:8765`, matching the route you configure in Cloudflare. It refuses a busy port instead of silently changing it. It does not change or delete existing Cloudflare configuration or disable TLS verification, and does not prove that inherited routing caused the reported 404. The temporary file is removed after the relay exits.
 
 Opening the public URL with `/info` appended in a browser should return `{"error":"Request rejected. Check pairing, request signature, clock and size."}` with HTTP 403. That is the normal response to an unsigned browser request; it does not authenticate the server. A browser 404 instead indicates that the requested URL did not serve this helper endpoint. A DNS NXDOMAIN indicates a missing hostname. A plain-text `Your request was blocked.` response differs from the helper rejection and does not establish a credential or controller-key problem. Compare these responses with the helper diagnostics before changing network settings or restarting repeatedly.
+
+Version 0.6.5 corrects the occupied-port failure reported during 0.6.4 Windows setup. The server disables address and port sharing and requests Windows exclusive address use before binding. If that option or binding fails, startup closes the socket and reports the error. Setup retains the occupied-port test; it is not skipped or weakened.
 
 ## Pairing and privacy
 
