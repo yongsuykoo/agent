@@ -15,6 +15,30 @@ EXTRACTION = {"capabilities": [{"name": "Add", "steps": ["Press plus"],
 
 
 class ResearchTests(unittest.TestCase):
+    def test_invalid_expected_result_is_repaired_using_the_same_documents(self):
+        researcher = CloudResearcher(key="test")
+        invalid = json.loads(json.dumps(EXTRACTION))
+        invalid["capabilities"][0]["expected_result"] = ""
+        def response(value):
+            return {"output": [{"content": [{"type": "output_text", "text": json.dumps(value)}]}]}
+        with patch.object(researcher, "request", side_effect=[response(invalid), response(EXTRACTION)]) as request:
+            result = researcher.extract("Calculator", "1", [DOCUMENT])
+        self.assertEqual(result["capabilities"][0]["expected_result"], "The sum")
+        first, second = [json.loads(call.kwargs["input"]) for call in request.call_args_list]
+        self.assertEqual(first["documents"], second["documents"])
+        self.assertIn("expected_result", second["validation_feedback"])
+        self.assertTrue(request.call_args.kwargs["text"]["format"]["strict"])
+
+    def test_unknown_evidence_is_never_accepted_after_bounded_repair(self):
+        researcher = CloudResearcher(key="test")
+        invalid = json.loads(json.dumps(EXTRACTION))
+        invalid["capabilities"][0]["source_ids"] = [99]
+        response = {"output": [{"content": [{"type": "output_text", "text": json.dumps(invalid)}]}]}
+        with patch.object(researcher, "request", return_value=response) as request:
+            with self.assertRaisesRegex(ValueError, "three validation attempts"):
+                researcher.extract("Calculator", "1", [DOCUMENT])
+        self.assertEqual(request.call_count, 3)
+
     def test_deeper_search_excludes_already_studied_citations(self):
         researcher = CloudResearcher(key="test")
         response = {"output": [{"content": [{"annotations": [

@@ -27,7 +27,7 @@ ACTION_FORMAT = {"type": "json_schema", "name": "desktop_action", "strict": True
 def exact_text_goal(task):
     """Recognize explicit single text-entry commands, preserving the requested text."""
     match = re.fullmatch(
-        r"\s*(?:Type exactly:|Replace the document text with exactly:) *(.+?)\s*",
+        r"\s*(?:Type exactly|Replace the document text with exactly)(?:\s*[:,]\s*|\s+)(.+?)\s*",
         task, flags=re.IGNORECASE | re.DOTALL)
     if not match:
         return None

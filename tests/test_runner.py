@@ -3,7 +3,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from app_agent.runner import TaskRunner, validate_action, reconcile_action
+from app_agent.runner import TaskRunner, validate_action, reconcile_action, exact_text_goal
 
 
 def observation(name="Add", enabled=True):
@@ -36,6 +36,12 @@ class FakeCloud:
 
 
 class RunnerTests(unittest.TestCase):
+    def test_exact_text_commands_accept_spoken_delimiters_without_changing_target(self):
+        for delimiter in (": ", ", ", " "):
+            self.assertEqual(exact_text_goal("Replace the document text with exactly" + delimiter + "Voice command verified."), "Voice command verified.")
+        self.assertIsNone(exact_text_goal("Replace the document text with exactlywhatever"))
+        self.assertIsNone(exact_text_goal("My agent can operate Notepad."))
+
     def execute(self, actions, approve=lambda action, obs: True, desktop=None, cancel=None):
         desktop = desktop or FakeDesktop()
         with tempfile.TemporaryDirectory() as directory:

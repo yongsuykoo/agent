@@ -232,7 +232,7 @@ class SelfTestTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "interactive Windows"):
                 self_test("unused")
 
-    def test_entire_suite_runs_tasks_and_verifies_report_with_simulated_windows(self, changed_process=False, learning_failure=False, with_voice=False, bad_transcript=False):
+    def test_entire_suite_runs_tasks_and_verifies_report_with_simulated_windows(self, changed_process=False, learning_failure=False, with_voice=False, bad_transcript=False, spoken_delimiter=False):
         from test_catalog import app, snapshot as inventory_snapshot
         class Desktop:
             def __init__(self, title, calculator=False):
@@ -299,7 +299,9 @@ class SelfTestTests(unittest.TestCase):
              patch.object(NotepadFixture, "open", open_fixture), \
              patch("app_agent.self_test.WindowsDesktop") as windows, \
              patch("app_agent.voice.synthetic_test_audio", return_value=b"synthetic fixture") as speech, \
-             patch("app_agent.voice.transcribe", return_value="Delete the document" if bad_transcript else "Replace the document text with exactly: Voice command verified."):
+             patch("app_agent.voice.transcribe", return_value="Delete the document" if bad_transcript else
+                   "Replace the document text with exactly Voice command verified." if spoken_delimiter else
+                   "Replace the document text with exactly: Voice command verified."):
             # Other Calculator windows must not affect the established fixture.
             windows.windows.return_value = [(41, "Calculator"), (42, "Calculator")]
             windows.return_value = calculator
@@ -357,6 +359,9 @@ class SelfTestTests(unittest.TestCase):
 
     def test_changed_speech_transcript_is_rejected_before_editing(self):
         self.test_entire_suite_runs_tasks_and_verifies_report_with_simulated_windows(with_voice=True, bad_transcript=True)
+
+    def test_speech_without_written_colon_runs_and_verifies_exact_output(self):
+        self.test_entire_suite_runs_tasks_and_verifies_report_with_simulated_windows(with_voice=True, spoken_delimiter=True)
 
     def test_entire_simulated_suite_with_windows_newline_translation(self):
         original = Path.write_text
