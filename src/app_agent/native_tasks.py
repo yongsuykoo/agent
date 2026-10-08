@@ -25,6 +25,24 @@ def run_logo(director, task, adapter=Photoshop):
                     for name in other.get('aliases', [other.get('name', '')]) if name):
                 raise RuntimeError('This native logo adapter supports Photoshop; the requested different app must use its own workflow.')
         app = select_photoshop(apps)
+        checkpoint = getattr(director, 'checkpoint', None)
+        if checkpoint:
+            saved = checkpoint.jobs.get(checkpoint.id)
+            if saved['verified']:
+                # A crash after durable export verification must not render again.
+                records = checkpoint.records()
+                last = records[-1]
+                proof = verify_exports(Path(last['directory']),last['design'],last['observation'])
+                if proof['files'] != saved['verified'][0]:
+                    raise RuntimeError('Saved verified exports changed; no automatic re-render.')
+                result.update(outcome='artifacts_verified',verified_results=proof['files'],steps=records)
+                return _save(director,result)
+            plan = {'steps':[{'app_id':app['id'],'task':task,'expected_result':'Verified PSD/PNG exports'}],
+                    'os_build':director.catalog.setting('machine_model',{}).get('os',{}).get('build'),
+                    'generations':{app['id']:app['generation']}}
+            if saved['plan'] and saved['plan'] != plan:
+                raise RuntimeError('Installed app changed during the saved logo goal; stale plan not replayed.')
+            checkpoint.save_plan(plan)
         def current():
             latest = director.catalog.get(app['id'])
             if director.cancel.is_set() or not latest or not latest.get('present', True) or latest['generation'] != app['generation']:
@@ -68,7 +86,10 @@ def run_logo(director, task, adapter=Photoshop):
             result['steps'].append(record)
             try:
                 director.emit('Creating logo layers and exporting PSD/PNG; checking file contents next.')
+                effect = checkpoint.begin_effect({'kind':'create_artifact','directory':str(directory),'app_id':app['id']}) if checkpoint else None
                 record['observation'] = native.render(design, directory, directory.name, director.cancel)
+                if checkpoint:
+                    checkpoint.applied(effect)
                 current()
                 latest_observation = desktop.observe()
                 if identity != tuple(latest_observation.get(k) for k in ('window_handle', 'process_id')):
@@ -80,6 +101,8 @@ def run_logo(director, task, adapter=Photoshop):
                     raise RuntimeError('App generation changed; verified recipe was not retained.')
                 result['outcome'] = 'artifacts_verified'
                 result['verified_results'] = record['verification']['files']
+                if checkpoint:
+                    checkpoint.verified(result['verified_results'],record)
                 for item in result['verified_results']:
                     director.emit('Verified export: ' + item['path'])
                 break
@@ -87,6 +110,10 @@ def run_logo(director, task, adapter=Photoshop):
                 record['outcome'] = 'verification_failed'; record['error'] = str(error)[:1500]
                 if director.cancel.is_set():
                     raise
+                if checkpoint and checkpoint.pending_actions():
+                    director.emit('Unverified native exports retained; automatic render retry stopped.')
+                    result['outcome'] = 'verification_failed'
+                    break
                 if attempt:
                     result['outcome'] = 'verification_failed'
                     break

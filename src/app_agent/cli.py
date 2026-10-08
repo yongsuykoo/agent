@@ -29,6 +29,15 @@ def main():
     query=commands.add_parser("knowledge-query", help="Retrieve local evidence relevant to a task; no provider calls")
     query.add_argument("task")
     commands.add_parser("apps", help="List discovered apps and documentation status")
+    commands.add_parser('jobs', help='Show saved goals, progress and recovery states locally')
+    submit = commands.add_parser('submit', help='Save a goal for the Windows UI to execute; no desktop action here')
+    submit.add_argument('task')
+    submit.add_argument('--autonomous', action='store_true',help='Authorize automatic actions for this submitted goal')
+    submit.add_argument('--vision', action='store_true',help='Authorize selected-window screenshot sharing for this goal')
+    commands.add_parser('pause-jobs', help='Pause the queue and fence running tasks before their next action')
+    commands.add_parser('resume-jobs', help='Resume safe saved goals; unverified actions still need review')
+    cancel_job = commands.add_parser('cancel-job', help='Cancel a saved goal')
+    cancel_job.add_argument('id')
     study = commands.add_parser("study-next", help="Research one queued app within the daily background budget")
     study.add_argument("--daily-limit", type=int, default=0, choices=range(0, 10001))
     campaign = commands.add_parser("study-campaign", help="Study queued apps and design capability experiments; no desktop mutations")
@@ -77,7 +86,24 @@ def main():
             finally:
                 cleanup()
             return
-        if args.command == "discover":
+        if args.command in ('jobs','submit','pause-jobs','resume-jobs','cancel-job'):
+            from .jobs import Jobs
+            jobs = Jobs(args.data_dir)
+            try:
+                if args.command == 'submit':
+                    result = {'id':jobs.submit(args.task,autonomous=args.autonomous,use_vision=args.vision),'status':'queued'}
+                elif args.command == 'pause-jobs':
+                    jobs.pause(); result = {'paused':True}
+                elif args.command == 'resume-jobs':
+                    jobs.resume(); result = {'paused':False}
+                elif args.command == 'cancel-job':
+                    result = {'cancelled':jobs.cancel(args.id)}
+                else:
+                    result = [{k:v for k,v in item.items() if k not in ('owner','owner_pid','lease')}
+                              for item in jobs.list()]
+            finally:
+                jobs.close()
+        elif args.command == "discover":
             result = installed_apps()
         elif args.command in ("doctor", "windows-smoke"):
             from .windows_checks import doctor, calculator_smoke

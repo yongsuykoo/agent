@@ -6,3 +6,4 @@ dist/
 .agent-data/
 remote-results/
 *controller-private*.json
+jobs.sqlite3*

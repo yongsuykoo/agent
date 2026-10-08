@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch, Mock
 from app_agent import ui
 from app_agent.catalog import Catalog
+from app_agent.jobs import Jobs
 from test_catalog import app, snapshot
 
 
@@ -87,6 +88,26 @@ class ImmediateWorker:
 
 
 class InterfaceFlowTests(unittest.TestCase):
+    def test_saved_goal_resumes_on_startup_without_a_run_click(self):
+        class RestartRoot(Root):
+            def mainloop(self):
+                maintenance=next(fn for delay,fn in self.callbacks if delay==1000)
+                pump=next(fn for delay,fn in self.callbacks if delay==100)
+                maintenance();pump()
+                maintenance();pump()
+                self.close()
+        self.test_startup_discovery_auto_route_research_and_memory(root=RestartRoot(),queued_goal=True)
+
+    def test_selected_window_chat_uses_the_durable_runtime(self):
+        class SelectedRoot(Root):
+            def mainloop(self):
+                maintenance=next(fn for delay,fn in self.callbacks if delay==1000)
+                pump=next(fn for delay,fn in self.callbacks if delay==100)
+                maintenance();pump()
+                self.window.current(1)
+                self.buttons['Run task']();pump();self.close()
+        with patch('app_agent.desktop.window_process_id',return_value=81):
+            self.test_startup_discovery_auto_route_research_and_memory(root=SelectedRoot())
     def test_voice_submission_waits_for_transcription_worker_to_finish_without_a_run_click(self):
         class VoiceRoot(Root):
             voice_phase = False
@@ -201,8 +222,12 @@ class InterfaceFlowTests(unittest.TestCase):
         with patch.object(ui, "practice_task", side_effect=AssertionError("The queued experiment must be reused")):
             self.test_startup_discovery_auto_route_research_and_memory(root=PracticeRoot(), ready_practice=True)
 
-    def test_startup_discovery_auto_route_research_and_memory(self, root=None, background_launcher=None, ready_practice=False):
+    def test_startup_discovery_auto_route_research_and_memory(self, root=None, background_launcher=None, ready_practice=False, queued_goal=False):
         root = root or Root()
+        def combobox(*args,**kwargs):
+            widget=Widget(*args,**kwargs)
+            root.window=widget
+            return widget
         def button(*args, **kwargs):
             root.buttons[kwargs["text"]] = kwargs["command"]
             return Widget(*args, **kwargs)
@@ -215,20 +240,25 @@ class InterfaceFlowTests(unittest.TestCase):
         cloud.request.side_effect = respond
         desktop = Mock()
         desktop.windows.return_value = [(10, "Calculator"), (20, "API keys - Google Chrome")]
-        desktop.return_value.observe.return_value = {"window": "Calculator", "window_handle": 10, "process_id": 81, "controls": []}
+        desktop.return_value.observe.return_value = {"window": "Calculator", "window_handle": 10, "process_id": 81,
+            "controls": [{'id':1,'type':'Text','name':'Display is 42','value':'','visible':True,'enabled':True,'automation_id':'CalculatorResults'}]}
         runner = Mock()
         runner.return_value.run.return_value = {"task": "Calculate", "outcome": "result_observed", "actions_executed": 6, "history": [{"verification": {"window": "Calculator", "controls": []}}]}
         blueprint = {"name": "Calculator", "version": "1", "capabilities": [{"name": "Add"}]}
         with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"AGENT_API_KEY": "test-key"}), \
              patch.object(ui.tk, "Tk", return_value=root), patch.object(ui.tk, "StringVar", Variable), \
              patch.object(ui.tk, "BooleanVar", Variable), patch.object(ui.tk, "IntVar", Variable), patch.object(ui.tk, "Text", Widget), \
-             patch.multiple(ui.ttk, Frame=Widget, Label=Widget, Entry=Widget, Combobox=Widget, Button=button, Checkbutton=Widget, Spinbox=Widget), \
+             patch.multiple(ui.ttk, Frame=Widget, Label=Widget, Entry=Widget, Combobox=combobox, Button=button, Checkbutton=Widget, Spinbox=Widget), \
              patch.object(ui, "AutomationWorker", ImmediateWorker), patch.object(ui, "launch_research", side_effect=background_launcher or (lambda fn: fn())), patch.object(ui, "WindowsDesktop", desktop), \
              patch.object(ui, "CloudResearcher", return_value=cloud), patch.object(ui, "TaskRunner", runner), \
              patch.object(ui, "scan_apps", return_value=snapshot([app()])), \
              patch.object(ui, "register_stop", return_value=threading.Event()), \
              patch.object(ui.messagebox, "askokcancel", return_value=True), \
              patch("app_agent.learning.research_app", return_value=blueprint):
+            if queued_goal:
+                jobs=Jobs(directory)
+                jobs.submit('Calculate 23 plus 19 and verify the result.',autonomous=True)
+                jobs.close()
             if ready_practice:
                 catalog = Catalog(directory)
                 try:
@@ -239,6 +269,14 @@ class InterfaceFlowTests(unittest.TestCase):
                 finally:
                     catalog.close()
             ui.launch(Path(directory))
+            if not ready_practice:
+                jobs=Jobs(directory)
+                try:
+                    self.assertEqual(len(jobs.list()),1)
+                    self.assertEqual(jobs.list()[0]['status'],'completed',jobs.list()[0]['detail'])
+                    self.assertEqual(jobs.list()[0]['verified'],['42'])
+                    self.assertFalse(jobs.paused())  # Closing differs from explicit STOP.
+                finally: jobs.close()
             catalog = Catalog(directory)
             try:
                 current = catalog.get(app()["id"])

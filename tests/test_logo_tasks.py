@@ -17,6 +17,7 @@ from app_agent.native_tasks import run_logo
 from app_agent.photoshop import Photoshop, select_photoshop, validate_native_identity
 from app_agent.photoshop_script import render_script
 from app_agent.task_director import TaskDirector
+from app_agent.jobs import Jobs
 from test_catalog import snapshot
 
 DESIGN = {'width': 64, 'height': 64, 'background': None,
@@ -243,6 +244,56 @@ class LogoTaskTests(unittest.TestCase):
         self.cloud=Mock();self.cloud.request.return_value=reply(DESIGN)
         self.approve=Mock(return_value=True);Adapter.calls=0
         self.director=TaskDirector(self.catalog,self.cloud,self.approve,lambda text:None,self.root,resolve=lambda a,c:Desktop())
+
+    def test_durable_verified_exports_survive_restart_without_a_second_render(self):
+        jobs=Jobs(self.root)
+        try:
+            identity=jobs.submit(BRIEF,autonomous=True)
+            checkpoint=jobs.claim(identity);self.director.checkpoint=checkpoint
+            first=run_logo(self.director,BRIEF,adapter=Adapter)
+            self.assertEqual(first['outcome'],'artifacts_verified')
+            self.assertEqual(len(jobs.get(identity)['verified']),1)
+            # Abrupt loss after export checkpoint but before job completion.
+            with jobs.db:
+                jobs.db.execute('UPDATE jobs SET lease=0 WHERE id=?',(identity,))
+                jobs.db.execute('UPDATE desktop_lease SET expires=0')
+            self.director.checkpoint=jobs.claim(identity)
+            second=run_logo(self.director,BRIEF,adapter=Adapter)
+            self.assertEqual(second['verified_results'],first['verified_results'])
+            self.assertEqual(Adapter.calls,1)
+            self.assertEqual(jobs.settle(self.director.checkpoint,second)['status'],'completed')
+        finally:
+            jobs.close()
+
+    def test_failed_native_render_is_not_repeated_by_durable_recovery(self):
+        jobs=Jobs(self.root)
+        try:
+            identity=jobs.submit(BRIEF,autonomous=True)
+            self.director.checkpoint=jobs.claim(identity)
+            class Interrupted(Adapter):
+                calls=0
+                def render(self,*args):
+                    type(self).calls+=1
+                    raise RuntimeError('Lost COM connection after render dispatch')
+            result=run_logo(self.director,BRIEF,adapter=Interrupted)
+            self.assertEqual(Interrupted.calls,1)
+            self.assertEqual(jobs.settle(self.director.checkpoint,result)['status'],'needs_review')
+            jobs.resume();self.assertIsNone(jobs.claim(identity))
+        finally:
+            jobs.close()
+
+    def test_deleted_checkpointed_exports_cannot_be_claimed_complete_or_rendered_again(self):
+        jobs=Jobs(self.root)
+        try:
+            identity=jobs.submit(BRIEF,autonomous=True)
+            self.director.checkpoint=jobs.claim(identity)
+            result=run_logo(self.director,BRIEF,adapter=Adapter)
+            Path(result['verified_results'][0]['path']).unlink()
+            repeated=run_logo(self.director,BRIEF,adapter=Adapter)
+            self.assertEqual(repeated['outcome'],'blocked')
+            self.assertEqual(Adapter.calls,1)
+        finally:
+            jobs.close()
     def tearDown(self):self.catalog.close();self.temp.cleanup()
 
     def test_complete_goal_checks_files_then_reuses_recipe_without_cloud_and_invalidates_after_update(self):

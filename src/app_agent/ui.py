@@ -22,6 +22,7 @@ from .campaign import study_campaign, practice_one
 from .routing import choose_app, launch_app, window_matches
 from .practice_policy import calculator_app, calculator_action
 from .app_practice import create_grant, grants_action
+from .jobs import Jobs
 
 
 def launch_research(function):
@@ -32,7 +33,7 @@ def launch_research(function):
 
 def launch(data_dir):
     root = tk.Tk()
-    root.title("Personal App Agent — 0.10.0")
+    root.title("Personal App Agent — 0.11.0")
     root.geometry("980x820")
     if not (os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")):
         key = simpledialog.askstring("Cloud AI setup", "OpenAI API key (kept in memory for this session).\nLeave blank to inspect windows without AI.", show="*", parent=root)
@@ -52,6 +53,7 @@ def launch(data_dir):
     from .installation_watch import InstallationMonitor
     installation_monitor=InstallationMonitor(data_dir,lambda text:events.put(('log',text)))
     state["voice_task_pending"] = False
+    state['wake_credentials'] = bool(os.getenv('AGENT_API_KEY') or os.getenv('OPENAI_API_KEY'))
     hotkey_stop = register_stop(lambda: (cancel.set(), events.put(("stop", None))), lambda text: events.put(("log", text)))
     frame = ttk.Frame(root, padding=12)
     frame.pack(fill="both", expand=True)
@@ -310,8 +312,14 @@ def launch(data_dir):
         approve_button.configure(state="disabled")
         reject_button.configure(state="disabled")
 
-    def stop():
+    def stop(closing=False):
         cancel.set()
+        if not closing:
+            saved = Jobs(data_dir)
+            try:
+                saved.pause()
+            finally:
+                saved.close()
         research_cancel.set()
         state["practice_pending"] = False
         state["voice_task_pending"] = False
@@ -377,6 +385,20 @@ def launch(data_dir):
         use_vision = vision.get() and mode in ("run", "practice")
         if use_vision and not autonomous_tasks.get() and not messagebox.askokcancel("Screenshot sharing", "Send images of the selected app window to OpenAI for this task? Images can include visible sensitive information and overlapping windows. Avoid confidential data. Coordinate clicks require your task/step authorization."):
             return
+        saved_job_id = None
+        if mode == 'run':
+            saved = Jobs(data_dir)
+            try:
+                from .desktop import window_process_id
+                binding = {'handle':handle,'process_id':window_process_id(handle)} if handle else None
+                saved_job_id = saved.submit(task,use_vision=use_vision,autonomous=autonomous_tasks.get(),window=binding)
+                saved.resume()
+                append('Goal saved: '+saved_job_id[:8]+'. Progress survives restarts.')
+            except Exception as error:
+                append('Could not save task: '+str(error))
+                return
+            finally:
+                saved.close()
         state["busy"] = True
         cancel.clear()
         task_permission.clear()
@@ -394,12 +416,16 @@ def launch(data_dir):
                 if not apps:
                     scan_machine(catalog, scanner=scan_apps, desktop=WindowsDesktop)
                     apps = catalog.apps()
-                if mode == "run" and selected_handle is None:
-                    from .task_director import TaskDirector, resolve_window
+                if mode == 'run':
+                    from .job_runtime import run_next
                     from .research import DeferredCloud
-                    TaskDirector(catalog, DeferredCloud(CloudResearcher), approve, emit, data_dir, cancel,
-                        resolve=lambda selected, event: resolve_window(selected, event, desktop=WindowsDesktop, launch=launch_app),
-                        runner=TaskRunner).run(task, use_vision=use_vision)
+                    from .task_director import resolve_window
+                    run_next(data_dir,DeferredCloud(CloudResearcher),
+                        lambda action,obs,automatic: approve(action,obs),emit,cancel,identity=saved_job_id,
+                        runner=TaskRunner,desktop=WindowsDesktop,
+                        shutdown=lambda:state['closing'],
+                        resolve=lambda selected,event: resolve_window(
+                            selected,event,desktop=WindowsDesktop,launch=launch_app))
                     return
                 if mode == "research":
                     matches = [item for item in apps if item["name"].casefold() == name.casefold()]
@@ -577,13 +603,13 @@ def launch(data_dir):
             append(error)
 
     def close():
-        stop()
+        state["closing"] = True
+        stop(closing=True)
         inventory_events.close()
         installation_monitor.close()
         if recorder.stream:
             recorder.stream.stop()
             recorder.stream.close()
-        state["closing"] = True
         hotkey_stop.set()
         automation.close()
         root.destroy()
@@ -655,6 +681,51 @@ def launch(data_dir):
     ttk.Button(toolbar, text="Open Calculator", command=lambda: subprocess.Popen(["calc.exe"])).pack(side="left", padx=5)
     ttk.Button(toolbar, text="Self-test", command=start_self_test).pack(side="left", padx=5)
     ttk.Button(toolbar, text="Learn all apps", command=start_campaign).pack(side="left", padx=5)
+    def show_jobs():
+        dialog = tk.Toplevel(root)
+        dialog.title('Saved goals and recovery')
+        dialog.geometry('900x460')
+        ttk.Label(dialog,text='Completed steps are retained. Unverified actions require review and are never automatically replayed.',wraplength=870).pack(anchor='w',padx=10,pady=8)
+        tree = ttk.Treeview(dialog,columns=('goal','status','progress'),show='headings')
+        for name,label in [('goal','Goal'),('status','State'),('progress','Verified steps')]:
+            tree.heading(name,text=label)
+            tree.column(name,width=550 if name=='goal' else 140)
+        tree.pack(fill='both',expand=True,padx=10,pady=8)
+        detail = tk.StringVar()
+        ttk.Label(dialog,textvariable=detail,wraplength=870).pack(anchor='w',padx=10)
+        def refresh_jobs():
+            saved = Jobs(data_dir)
+            try:
+                for row in tree.get_children(): tree.delete(row)
+                for item in saved.list():
+                    count = len((item['plan'] or {}).get('steps',[]))
+                    tree.insert('','end',iid=item['id'],values=(item['task'],item['status'],f"{len(item['verified'])}/{count or '?'}"))
+                detail.set('Queue paused.' if saved.paused() else 'Queue active while the app is open.')
+            finally:
+                saved.close()
+        def selection(event):
+            if tree.selection():
+                saved = Jobs(data_dir)
+                try: detail.set(saved.get(tree.selection()[0])['detail'])
+                finally: saved.close()
+        def resume_jobs():
+            saved = Jobs(data_dir)
+            try: saved.resume()
+            finally: saved.close()
+            cancel.clear()
+            refresh_jobs()
+        def cancel_job():
+            if tree.selection():
+                saved = Jobs(data_dir)
+                try: saved.cancel(tree.selection()[0])
+                finally: saved.close()
+            refresh_jobs()
+        tree.bind('<<TreeviewSelect>>',selection)
+        buttons = ttk.Frame(dialog);buttons.pack(fill='x',padx=10,pady=10)
+        for text,action in [('Refresh',refresh_jobs),('Resume safe jobs',resume_jobs),('Pause queue',lambda:(stop(),refresh_jobs())),('Cancel selected',cancel_job)]:
+            ttk.Button(buttons,text=text,command=action).pack(side='left',padx=4)
+        refresh_jobs()
+    ttk.Button(toolbar,text='Saved goals',command=show_jobs).pack(side='left',padx=5)
     ttk.Checkbutton(learning_bar, text="Automatically study discovered/new apps", variable=auto_learn, command=learning_settings).pack(side="left")
     ttk.Label(learning_options, text="Daily studies/designs (0 = uncapped):").pack(side="left", padx=5)
     ttk.Spinbox(learning_options, from_=0, to=10000, textvariable=learning_limit, width=5, command=learning_settings).pack(side="left")
@@ -680,6 +751,32 @@ def launch(data_dir):
         events.put(("log", f"Windows automation worker failed: {error}"))
         events.put(("done", None))
     automation = AutomationWorker(worker, initialization_error)
+    def resume_saved_job():
+        saved = Jobs(data_dir)
+        try:
+            wake = state['wake_credentials']
+            pending = saved.ready(credentials=wake)
+        finally:
+            saved.close()
+        if not pending:
+            return False
+        state['wake_credentials'] = False
+        state['busy'] = True
+        cancel.clear()
+        task_permission.clear()
+        automatic_allowed = autonomous_tasks.get()
+        status.set('Continuing saved goals; STOP pauses the queue.')
+        def work():
+            from .job_runtime import run_next
+            from .research import DeferredCloud
+            from .task_director import resolve_window
+            run_next(data_dir,DeferredCloud(CloudResearcher),
+                lambda action,obs,automatic: True if automatic and automatic_allowed and not cancel.is_set() else approve(action,obs),
+                lambda text:events.put(('log',text)),cancel,credentials=wake,shutdown=lambda:state['closing'],
+                runner=TaskRunner,desktop=WindowsDesktop,
+                resolve=lambda selected,event:resolve_window(selected,event,desktop=WindowsDesktop,launch=launch_app))
+        automation.submit(work)
+        return True
     def background_practice():
         if state["busy"] or state["recording"] or state["learning_paused"]:
             return
@@ -778,6 +875,8 @@ def launch(data_dir):
         if not state["busy"] and not state["recording"]:
             if changed or time.monotonic() - state["last_scan"] > 300:
                 scan_inventory()
+            elif resume_saved_job():
+                pass
             elif state["practice_pending"] and not state["learning_paused"]:
                 background_practice()
             elif auto_learn.get() and not state["learning_paused"] and not state["research_busy"] and time.monotonic() - state["last_learning"] > 60 and (os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")):

@@ -126,16 +126,18 @@ def resolve_window(app, cancel, desktop=WindowsDesktop, launch=launch_app, timeo
 
 
 class TaskDirector:
-    def __init__(self, catalog, cloud, approve, emit, directory, cancel=None, resolve=resolve_window, runner=TaskRunner):
+    def __init__(self, catalog, cloud, approve, emit, directory, cancel=None, resolve=resolve_window, runner=TaskRunner, checkpoint=None, selected_app=None):
         self.catalog,self.cloud,self.approve,self.emit,self.directory = catalog,cloud,approve,emit,Path(directory)
         self.cancel,self.resolve,self.runner = cancel or threading.Event(),resolve,runner
+        self.checkpoint,self.selected_app = checkpoint,selected_app
 
     def run(self, task, use_vision=False):
         from .logo_design import logo_request
         if logo_request(task):
             from .native_tasks import run_logo
             return run_logo(self, task)
-        records, verified = [], []
+        records = self.checkpoint.records() if self.checkpoint else []
+        verified = self.checkpoint.jobs.get(self.checkpoint.id)['verified'] if self.checkpoint else []
         outcome = 'error'
         try:
             from .system_knowledge import task_context, relevant_apps
@@ -143,13 +145,38 @@ class TaskDirector:
             cached = self.catalog.setting(cache_key, {})
             os_build=self.catalog.setting('machine_model',{}).get('os',{}).get('build')
             apps = {app['id']: app for app in self.catalog.apps()}
-            if cached.get('os_build')==os_build and cached.get('steps') and cached.get('generations') and all(identity in apps and apps[identity]['generation'] == generation
+            saved = self.checkpoint.jobs.get(self.checkpoint.id)['plan'] if self.checkpoint else None
+            if saved and (saved['os_build'] != os_build or not all(identity in apps and apps[identity]['generation'] == generation
+                    for identity,generation in saved['generations'].items())):
+                if verified or self.checkpoint.pending_actions():
+                    raise RuntimeError('Installed app or Windows version changed during the saved goal; checkpoints retained, stale plan not replayed.')
+                saved = None
+                self.emit('Installation changed before any action; automatically planning against current versions.')
+            if saved:
+                plan = saved['steps']
+                self.emit(f'Resuming saved goal after {len(verified)} verified step(s).')
+            elif self.selected_app:
+                exact = exact_text_goal(task)
+                if exact is not None:
+                    plan = [{'app_id':self.selected_app['id'], 'task':task,
+                             'expected_result':exact}]
+                else:
+                    plan = task_plan(task,[self.selected_app],self.cloud,task_context(self.catalog,task))
+            elif cached.get('os_build')==os_build and cached.get('steps') and cached.get('generations') and all(identity in apps and apps[identity]['generation'] == generation
                     for identity, generation in cached['generations'].items()):
                 plan = cached['steps']
                 self.emit('Reusing the verified task plan for unchanged app versions.')
             else:
                 plan = task_plan(task,relevant_apps(self.catalog,task,list(apps.values())),self.cloud,task_context(self.catalog,task))
+            if self.checkpoint and not saved:
+                self.checkpoint.save_plan({'steps':plan, 'os_build':os_build,
+                    'generations':{step['app_id']:apps[step['app_id']]['generation'] for step in plan}})
             for number, step in enumerate(plan,1):
+                if number <= len(verified):
+                    continue
+                if self.checkpoint:
+                    self.checkpoint.step = number
+                    self.checkpoint.touch()
                 if self.cancel.is_set():
                     outcome='cancelled';break
                 def bind(value):
@@ -158,6 +185,8 @@ class TaskDirector:
                 app=self.catalog.get(step['app_id'])
                 self.emit(f'Task step {number}/{len(plan)}: {app["name"]}')
                 desktop=self.resolve(app,self.cancel)
+                if self.checkpoint:
+                    desktop=self.checkpoint.desktop(desktop)
                 observed=desktop.observe()
                 identity=(observed.get('window_handle'),observed.get('process_id'))
                 previous=self.catalog.workflows(app['id'],app['generation'])
@@ -180,12 +209,23 @@ class TaskDirector:
                         required_result_text=expected,result_control_id=result_id)
                     records.append({'app_id':app['id'],'generation':app['generation'],'step':number,'attempt':attempt+1,'record':record})
                     if record['outcome']=='result_observed':
+                        if self.checkpoint:
+                            from .runner import result_matches
+                            proof = desktop.observe()
+                            if self.catalog.get(app['id'])['generation'] != app['generation'] or identity != (proof.get('window_handle'),proof.get('process_id')) or not result_matches(
+                                    proof,expected,exact_text_goal(requested),result_id):
+                                raise RuntimeError('Saved-step output failed independent checkpoint verification.')
                         self.catalog.save_workflow(app['id'],app['generation'],record)
                         evidence = next((entry['verification'] for entry in reversed(record.get('history', []))
                                          if 'verification' in entry), None)
                         if evidence:
                             self.catalog.save_interface(app['id'],app['generation'],evidence)
+                        if self.checkpoint:
+                            self.checkpoint.verified(expected, records[-1])
                         verified.append(expected);break
+                    if self.checkpoint and self.checkpoint.pending_actions():
+                        self.emit('Unverified action retained; automatic step retry stopped to avoid duplicate effects.')
+                        break
                     if self.cancel.is_set() or record['outcome'] not in ('stalled','recovery_limit','verification_failed') or attempt:
                         break
                     self.emit('Studying recovery guidance from the failed observed workflow before one retry.')
