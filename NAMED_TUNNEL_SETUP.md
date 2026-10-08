@@ -1,4 +1,4 @@
-# Connect through agent.papaprint.store — 0.6.6
+# Connect through agent.papaprint.store — 0.6.7
 
 This uses a dedicated hostname in your Cloudflare account. It gives you control over that hostname's routing and security settings. It does not guarantee that the cloud connection will succeed: the controller must receive and authenticate the helper's response before any Windows tests begin.
 
@@ -25,7 +25,7 @@ The full hostname is **agent.papaprint.store**. The origin is **http://127.0.0.1
 ## 2. Start the updated Windows helper
 
 1. Close the old App Agent and connection helper. Download the [Windows test kit](downloads/app-agent-windows-test-kit.zip), extract it into a **new folder**, and run `windows\Setup.cmd` inside that folder.
-2. Run **`windows\ConnectNamed.cmd`**. It opens App Agent connection **0.6.6**, with named mode enabled and **agent.papaprint.store** filled in.
+2. Run **`windows\ConnectNamed.cmd`**. It opens App Agent connection **0.6.7**, with named mode enabled and **agent.papaprint.store** filled in.
 3. Paste the token or copied installation command into the **Cloudflare tunnel token** masked field. It is used only in the cloudflared child process environment; it is not saved to a file or placed in the process command line. The helper's diagnostic output redacts it.
 4. Leave automatic Windows tests enabled. AI tests and documentation research are optional: enter your OpenAI API key in the separate local masked field and enable the AI option when wanted. They incur provider usage charges.
 5. Click **Start connection** and accept its scope prompt. Leave the helper open. After registration, click **Copy connection diagnostics** and send the copied report to the testing chat. It includes the public pairing link; it contains no tunnel token or provider key.
@@ -59,4 +59,6 @@ An interactive Cloudflare Access login page also prevents the current machine cl
 
 ## What has been tested
 
-The 0.6.6 checkout and extracted-kit installed-wheel suites each passed **181 tests**. They exercise real signatures, encryption and loopback HTTP exchanges, custom-host selection, local credential parsing, fixed-port refusal, and simulated Windows/native/model paths. The latest live 0.6.5 AI-enabled suite passed **11 checks and failed two**, with none skipped: native Calculator/Notepad and two AI Notepad replacements passed; AI Calculator and independent documentation-to-practice failed. Version 0.6.6 adds actual-result feedback and bounded practice-plan validation/repair. Those corrections still require a live Windows retest. The named hostname and origin remain unchanged; no new tunnel or DNS route is needed to update the helper. No claim of universal app mastery or 80% completion follows from these checks.
+The 0.6.7 checkout and extracted-kit installed-wheel suites each passed **184 tests**. They exercise real signatures, encryption and loopback HTTP, plus simulated Windows/native/model paths. The live 0.6.6 session completed all 13 checks: **12 passed, one failed, zero skipped/cancelled**. AI Calculator passed after seven actions with display 45. Independent documentation-to-practice still declined a suitable experiment after researching five capabilities. A subsequent bounded study left ten documented apps, 45 unverified capabilities and three unexecuted plans among 404 detected apps.
+
+Version 0.6.7 adds observed editor control context, one bounded follow-up documentation study when no practice is supported, and retained failure diagnostics. These changes have not run live on Windows. The existing tunnel/hostname/origin are unchanged; no new DNS or tunnel configuration is needed. Successful checks do not establish 80% completion or universal app mastery.

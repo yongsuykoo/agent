@@ -19,7 +19,8 @@ from .practice_policy import calculator_action
 from .windows_checks import calculator_smoke, doctor
 from .discovery import scan_apps
 from .catalog import Catalog
-from .learning import ensure_blueprint, practice_task
+from .learning import ensure_blueprint, practice_task, PracticeUnavailable, merge_blueprints
+from .research import research_app
 from .campaign import practice_one
 from .app_practice import create_grant, grants_action
 
@@ -159,6 +160,7 @@ def learning_experiment(fixture, cloud, run_dir, cancel, emit):
         raise SkipCheck("Cloud reasoning not requested or no API key available.")
     fixture.observe()
     catalog = Catalog(Path(run_dir) / "learning-test")
+    blueprint = None
     try:
         # This isolated identity is a test fixture, not a discovered app version.
         # Unknown version applicability must remain a documentation limitation.
@@ -167,12 +169,31 @@ def learning_experiment(fixture, cloud, run_dir, cancel, emit):
         catalog.sync({"apps": [app], "complete_sources": ["self-test"]})
         current = catalog.get(app["id"])
         blueprint = ensure_blueprint(catalog, current, cloud, emit, cancel)
-        plan = practice_task(blueprint, cloud, experiment_context={
+        observed_editor = editor(fixture.observe())
+        context = {
             "workspace": "A new disposable Notepad test document",
             "permitted_actions": ["Replace document text using the existing editable control"],
+            "observed_controls": [{key: observed_editor.get(key) for key in
+                                   ("name", "type", "automation_id", "actions", "enabled", "visible")}],
             "required_task_form": "Replace the document text with exactly: <your own short test text>",
             "verification": "expected_result must be exactly your chosen document text; choose a documented text-entry operation",
-            "forbidden_actions": ["Save", "Open another document", "Invoke menus", "Change settings"]}, cancel=cancel)
+            "forbidden_actions": ["Save", "Open another document", "Invoke menus", "Change settings"]}
+        try:
+            plan = practice_task(blueprint, cloud, experiment_context=context, cancel=cancel)
+        except PracticeUnavailable:
+            if cancel.is_set():
+                raise RuntimeError("Self-test stopped.")
+            emit("No documented experiment fits the observed editor scope; studying additional documentation once.")
+            additional = research_app(app["name"], app["version"], cloud,
+                focus={"practice_scope": context, "purpose": "Find documented workflows applicable to these observed controls"},
+                exclude_urls=[source["url"] for source in blueprint.get("sources", [])],
+                known_capabilities=[cap["name"] for cap in blueprint["capabilities"]])
+            if cancel.is_set():
+                raise RuntimeError("Self-test stopped.")
+            blueprint, _ = merge_blueprints(blueprint, additional)
+            if not catalog.save_blueprint(app["id"], current["generation"], blueprint):
+                raise RuntimeError("App changed during follow-up study; no experiment executed.")
+            plan = practice_task(blueprint, cloud, experiment_context=context, cancel=cancel)
         if cancel.is_set():
             raise RuntimeError("Self-test stopped.")
         if exact_text_goal(plan["task"]) != plan["expected_result"]:
@@ -192,6 +213,12 @@ def learning_experiment(fixture, cloud, run_dir, cancel, emit):
         return {**result, "generated_task": plan["task"], "exact_match": True,
                 "documentation_sources": [source["url"] for source in blueprint.get("sources", [])],
                 "documented_capabilities": len(blueprint["capabilities"]), "overview": catalog.learning_overview()}
+    except Exception as error:
+        if blueprint is not None:
+            error.details = {**getattr(error, "details", {}),
+                             "documentation_sources": [source["url"] for source in blueprint.get("sources", [])],
+                             "documented_capability_names": [cap["name"] for cap in blueprint["capabilities"]]}
+        raise
     finally:
         catalog.close()
 

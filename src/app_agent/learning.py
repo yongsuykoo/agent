@@ -3,6 +3,13 @@ from datetime import datetime, timedelta, timezone
 from .research import research_app
 
 
+class PracticeUnavailable(RuntimeError):
+    def __init__(self, plan):
+        super().__init__("No suitable disposable practice task found; documentation retained.")
+        self.details = {"practice_plan": {key: value[:2000] for key, value in plan.items()
+                                        if key in ("task", "expected_result", "capability_name", "risk") and isinstance(value, str)}}
+
+
 def ensure_blueprint(catalog, app, cloud, emit, cancel=None):
     if app.get("blueprint"):
         return app["blueprint"]
@@ -75,7 +82,7 @@ def practice_task(blueprint, cloud, previous_workflows=None, capability_name=Non
             if not isinstance(plan, dict):
                 raise ValueError("Practice plan must be a JSON object.")
             if plan.get("risk") != "disposable":
-                raise RuntimeError("No suitable disposable practice task found; documentation retained.")
+                raise PracticeUnavailable(plan)
             for field in ("task", "expected_result"):
                 if not isinstance(plan.get(field), str) or not plan[field].strip() or len(plan[field]) > 2000:
                     raise ValueError("Practice plan lacks a task or observable result.")

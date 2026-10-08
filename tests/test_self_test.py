@@ -116,6 +116,71 @@ class SelfTestTests(unittest.TestCase):
             fixture.observe.assert_not_called()
             research.assert_not_called()
 
+    def test_unavailable_practice_studies_once_using_observed_controls_then_executes(self):
+        from app_agent.learning import PracticeUnavailable
+        first = {"sources": [{"url": "https://example.com/menu"}], "capabilities": [{"name": "Menus"}]}
+        extra = {"sources": [{"url": "https://example.com/editor"}], "capabilities": [{"name": "Write"}]}
+        plan = {"task": "Replace the document text with exactly: Discovered practice", "expected_result": "Discovered practice",
+                "capability_name": "Write", "risk": "disposable"}
+        with tempfile.TemporaryDirectory() as directory, \
+             patch("app_agent.learning.research_app", return_value=first), \
+             patch("app_agent.self_test.research_app", return_value=extra) as research, \
+             patch("app_agent.self_test.practice_task", side_effect=[PracticeUnavailable({"risk": "unsupported"}), plan]) as planner, \
+             patch("app_agent.self_test.practice_one") as execute:
+            fixture = self.fixture(directory)
+            fixture.desktop.act.side_effect = lambda action: fixture.desktop.observe.return_value["controls"][0].update(value=action["text"])
+            def complete(*args, **kwargs):
+                fixture.desktop.observe.return_value["controls"][0]["value"] = plan["expected_result"]
+                return {"status": "experiment_observed", "outcome": "result_observed", "actions_executed": 1}
+            execute.side_effect = complete
+            result = learning_experiment(fixture, Mock(), directory, threading.Event(), lambda text: None)
+            self.assertTrue(result["exact_match"])
+            self.assertEqual(result["documented_capabilities"], 2)
+            self.assertEqual(planner.call_count, 2)
+            research.assert_called_once()
+            context = research.call_args.kwargs["focus"]["practice_scope"]
+            self.assertEqual(context["observed_controls"][0]["actions"], ["type"])
+            self.assertNotIn("value", context["observed_controls"][0])
+            self.assertEqual(research.call_args.kwargs["exclude_urls"], ["https://example.com/menu"])
+            self.assertEqual(research.call_args.kwargs["known_capabilities"], ["Menus"])
+
+    def test_unavailable_practice_stops_after_one_followup_and_preserves_failure_evidence(self):
+        from app_agent.learning import PracticeUnavailable
+        blueprint = {"sources": [{"url": "https://example.com/menu"}], "capabilities": [{"name": "Menus"}]}
+        refusal = {"task": "Needs menus outside scope", "risk": "unsupported"}
+        with tempfile.TemporaryDirectory() as directory, \
+             patch("app_agent.learning.research_app", return_value=blueprint), \
+             patch("app_agent.self_test.research_app", return_value=blueprint) as research, \
+             patch("app_agent.self_test.practice_task") as planner:
+            def unavailable(*args, **kwargs):
+                raise PracticeUnavailable(refusal)
+            planner.side_effect = unavailable
+            fixture = self.fixture(directory)
+            with self.assertRaises(PracticeUnavailable) as raised:
+                learning_experiment(fixture, Mock(), directory, threading.Event(), lambda text: None)
+            self.assertEqual(planner.call_count, 2)
+            research.assert_called_once()
+            fixture.desktop.act.assert_not_called()
+            self.assertEqual(raised.exception.details["practice_plan"], refusal)
+            self.assertEqual(raised.exception.details["documented_capability_names"], ["Menus"])
+
+    def test_cancelled_followup_study_never_plans_or_edits_again(self):
+        from app_agent.learning import PracticeUnavailable
+        blueprint = {"capabilities": [{"name": "Menus"}]}
+        cancel = threading.Event()
+        def followup(*args, **kwargs):
+            cancel.set()
+            return blueprint
+        with tempfile.TemporaryDirectory() as directory, \
+             patch("app_agent.learning.research_app", return_value=blueprint), \
+             patch("app_agent.self_test.research_app", side_effect=followup), \
+             patch("app_agent.self_test.practice_task", side_effect=PracticeUnavailable({"risk": "unsupported"})) as planner:
+            fixture = self.fixture(directory)
+            with self.assertRaisesRegex(RuntimeError, "Self-test stopped"):
+                learning_experiment(fixture, Mock(), directory, cancel, lambda text: None)
+            self.assertEqual(planner.call_count, 1)
+            fixture.desktop.act.assert_not_called()
+
     def test_save_does_not_send_shortcut_into_other_foreground_window(self):
         functions = types.SimpleNamespace(GetForegroundWindow=lambda: 999)
         package = types.ModuleType("pywinauto")
