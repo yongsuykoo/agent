@@ -3,7 +3,6 @@ import json
 import os
 from pathlib import Path
 import queue
-import re
 import subprocess
 import sys
 import threading
@@ -16,6 +15,7 @@ from .remote_bridge import BridgeSession, execute_job, make_server
 from .remote_protocol import fingerprint
 from .research import validate_api_key
 from .connection_launcher import find_tunnel_executable
+from .relay_diagnostics import RelayDiagnostics, check_local_helper
 
 
 def tunnel_executable():
@@ -32,7 +32,7 @@ def launch_connection(data_dir, controller_key):
     controller_fingerprint = fingerprint(public)
     executable = tunnel_executable()
     root = tk.Tk()
-    root.title("App Agent connection — 0.6.1")
+    root.title("App Agent connection — 0.6.2")
     root.geometry("900x650")
     frame = ttk.Frame(root, padding=16)
     frame.pack(fill="both", expand=True)
@@ -60,7 +60,9 @@ def launch_connection(data_dir, controller_key):
     output = tk.Text(frame, height=8, state="disabled")
     output.pack(fill="both", expand=True, pady=8)
     events = queue.Queue()
-    state = {"session": None, "server": None, "tunnel": None, "worker": None, "closed": False, "disconnecting": False}
+    state = {"session": None, "server": None, "tunnel": None, "worker": None, "closed": False,
+             "disconnecting": False, "local_ok": False, "registered_once": False}
+    diagnostics = RelayDiagnostics()
     original_key = os.environ.get("AGENT_API_KEY")
     grants = {}
     pending_permissions = []
@@ -75,6 +77,7 @@ def launch_connection(data_dir, controller_key):
         if state["disconnecting"]:
             return
         state["disconnecting"] = True
+        diagnostics.connections.clear()
         grants.clear()
         for pending in pending_permissions:
             pending["event"].set()
@@ -140,6 +143,10 @@ def launch_connection(data_dir, controller_key):
             server = make_server(session)
             state["server"] = server
             threading.Thread(target=server.serve_forever, daemon=True).start()
+            state["local_ok"] = check_local_helper(server.server_port)
+            if not state["local_ok"]:
+                raise RuntimeError("The local helper did not pass its HTTP check. Copy connection diagnostics.")
+            append(f"Local helper HTTP check passed: http://127.0.0.1:{server.server_port}/info")
             tunnel = subprocess.Popen([executable, "tunnel", "--url", f"http://127.0.0.1:{server.server_port}",
                                        "--no-autoupdate", "--protocol", "http2"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                       text=True, encoding="utf-8", errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -147,11 +154,7 @@ def launch_connection(data_dir, controller_key):
             started = time.monotonic()
             def read_tunnel():
                 for line in tunnel.stdout:
-                    match = re.search(r"https://[a-z0-9-]+\.trycloudflare\.com", line)
-                    if match:
-                        events.put(("link", match.group(0) + "#key=" + session.public_key))
-                    elif "ERR" in line:
-                        events.put(("log", "Relay error: " + line.strip()[:500]))
+                    events.put(("relay_line", line[:2000]))
                 events.put(("tunnel_closed", None))
             threading.Thread(target=read_tunnel, daemon=True).start()
             state["started"] = started
@@ -169,9 +172,20 @@ def launch_connection(data_dir, controller_key):
             root.clipboard_clear()
             root.clipboard_append(link.get())
 
+    def copy_diagnostics():
+        server, tunnel = state["server"], state["tunnel"]
+        report = diagnostics.report("0.6.2", controller_fingerprint,
+                                    server.server_port if server else None,
+                                    state["local_ok"] and not state["disconnecting"],
+                                    tunnel is not None and tunnel.poll() is None)
+        root.clipboard_clear()
+        root.clipboard_append(report)
+        append("Connection diagnostics copied. They contain no provider key or private controller identity.")
+
     start_button = ttk.Button(buttons, text="Start connection", command=start)
     start_button.pack(side="left")
     ttk.Button(buttons, text="Copy pairing link", command=copy_link).pack(side="left", padx=8)
+    ttk.Button(buttons, text="Copy connection diagnostics", command=copy_diagnostics).pack(side="left", padx=8)
     ttk.Button(buttons, text="STOP / disconnect", command=stop).pack(side="left")
     from .hotkey import register_stop
     hotkey_stop = register_stop(lambda: (state["session"].stop() if state["session"] else None, events.put(("disconnect", None))),
@@ -218,10 +232,18 @@ def launch_connection(data_dir, controller_key):
                 kind, value = events.get_nowait()
             except queue.Empty:
                 break
-            if kind == "link":
-                if state["session"].active():
-                    link.set(value)
-                    status.set("Connected relay. Copy the full public pairing link to this chat.")
+            if kind == "relay_line":
+                diagnostics.observe(value)
+                if state["session"].active() and not state["disconnecting"]:
+                    if diagnostics.ready:
+                        state["registered_once"] = True
+                        link.set(diagnostics.url + "#key=" + state["session"].public_key)
+                        status.set("Relay connection registered. Copy the pairing link; the cloud controller must still verify it.")
+                    else:
+                        link.set("")
+                        status.set("Waiting for relay registration. An assigned address alone does not confirm a connection.")
+                    if "ERR" in value or "WRN" in value:
+                        append("Relay: " + diagnostics.lines[-1])
             elif kind == "permission":
                 permission_dialog(value)
             elif kind in ("disconnect", "tunnel_closed", "error"):
@@ -231,8 +253,10 @@ def launch_connection(data_dir, controller_key):
             else:
                 append(value)
         if state["session"] and (not state["session"].active() or
-                (not link.get() and time.monotonic() - state.get("started", time.monotonic()) > 60)):
+                (not state["registered_once"] and time.monotonic() - state.get("started", time.monotonic()) > 90)):
             if state["tunnel"] and state["tunnel"].poll() is None:
+                if state["session"].active():
+                    append("Relay did not register within 90 seconds. Copy connection diagnostics before closing this window.")
                 stop()
         if not state["closed"]:
             root.after(200, pump)

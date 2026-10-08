@@ -226,6 +226,22 @@ class ConnectionIntegrationTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "stopped"):
             self.client.submit("inventory")
 
+    def test_local_startup_probe_reaches_bridge_without_executing_jobs(self):
+        from app_agent.relay_diagnostics import check_local_helper
+        self.assertTrue(check_local_helper(self.server.server_port))
+        self.assertEqual(self.calls, [])
+
+    def test_external_http_failures_do_not_claim_a_helper_authentication_failure(self):
+        from io import BytesIO
+        for status, payload, explanation in ((403, b'Your request was blocked.', 'without the expected helper response'),
+                                             (404, b'Not found', 'Relay returned HTTP 404')):
+            error = HTTPError(self.base + '/info', status, 'Rejected', {}, BytesIO(payload))
+            with self.subTest(status=status), patch('app_agent.remote_client.build_opener') as opener:
+                opener.return_value.open.side_effect = error
+                with self.assertRaisesRegex(RuntimeError, explanation):
+                    self.client.request('GET', '/info')
+        self.assertEqual(self.calls, [])
+
     def test_unauthenticated_or_wrong_controller_requests_never_execute(self):
         request = Request(self.base + "/jobs", data=canonical({"operation": "inventory"}), headers={"Content-Type": "application/json"})
         with self.assertRaises(HTTPError) as failure:

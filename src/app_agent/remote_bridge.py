@@ -12,6 +12,7 @@ import uuid
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from .remote_protocol import RequestVerifier, encrypt_result, canonical, encode, raw_public
+from .relay_diagnostics import BRIDGE_REJECTION
 
 OPERATIONS = {"inventory", "learning_report", "windows", "inspect_window", "self_test", "study", "task"}
 
@@ -233,7 +234,7 @@ def make_server(session):
                     result = {"error": str(error)[:1000]}
                     self.reply(400, encrypt_result(session.verifier.encryption, session.signing, result, nonce))
                 else:
-                    self.reply(403, {"error": "Request rejected. Check pairing, request signature, clock and size."})
+                    self.reply(403, {"error": BRIDGE_REJECTION})
 
         def reply(self, status, value):
             body = canonical(value)

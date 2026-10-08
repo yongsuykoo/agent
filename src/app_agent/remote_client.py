@@ -9,6 +9,7 @@ from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from .remote_protocol import canonical, decode, decrypt_result, sign_request
+from .relay_diagnostics import BRIDGE_REJECTION
 
 
 class NoRedirects(HTTPRedirectHandler):
@@ -48,6 +49,16 @@ class RemoteClient:
             if len(payload) > 8_000_000:
                 raise RuntimeError("Remote result exceeds the size limit.")
             if response.status not in (200, 400):
+                if response.status == 404:
+                    raise RuntimeError("Relay returned HTTP 404 for the helper endpoint. Check that the current Windows helper is running and copy its connection diagnostics.")
+                if response.status == 403:
+                    try:
+                        rejected = json.loads(payload) == {"error": BRIDGE_REJECTION}
+                    except (ValueError, UnicodeError):
+                        rejected = False
+                    if rejected:
+                        raise RuntimeError("HTTP 403 with a bridge-style rejection. Verify the pinned controller, current pairing link and clock; this unsigned response does not authenticate the helper.")
+                    raise RuntimeError("HTTP 403 without the expected helper response. Inspect relay diagnostics and cloud network policy; no authenticated Windows connection was established.")
                 raise RuntimeError(f"Windows connection request rejected (HTTP {response.status}). Check the link and cloud network access.")
             value = decrypt_result(self.keys, self.signing_public, json.loads(payload), headers["X-Agent-Nonce"])
         if "error" in value and "id" not in value:
