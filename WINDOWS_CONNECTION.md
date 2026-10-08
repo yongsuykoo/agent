@@ -56,4 +56,6 @@ The cloud environment must allow HTTPS/443 to the exact selected hostname, eithe
 
 ## Validation
 
-Regression tests exercise real Ed25519/X25519/AES-GCM operations and a real loopback HTTP server: forgery, body/route changes, replay/expiry, wrong server identity, encrypted results, queue bounds, cancellation, local scope validation and the automation thread. Native/model app execution is simulated in these cloud tests. WinGet installation, Cloudflare relay startup and the live desktop connection remain unvalidated until this companion runs on Windows and the controller receives the link. No live connection or 80% goal completion is claimed by publishing it.
+Regression tests exercise real Ed25519/X25519/AES-GCM operations and a real loopback HTTP server: forgery, body/route changes, replay/expiry, wrong server identity, encrypted results, queue bounds, cancellation, local scope validation and the automation thread. Native/model app execution is simulated in these cloud tests.
+
+On October 8, 2026, the controller authenticated and decrypted a live 0.6.5 Windows `/info` response through the account-owned named hostname. It submitted and retrieved the automatic Windows suite: nine native checks passed, zero failed, and four AI checks were skipped because AI jobs were disabled. A separate inventory job completed with 404 apps. Live AI research/practice, Windows cancellation/restart checks and fresh WinGet installation remain to be verified. Successful pairing and native checks do not establish 80% completion or universal app mastery.
