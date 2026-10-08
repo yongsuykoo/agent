@@ -1,4 +1,4 @@
-# Automatic maintenance — 0.7.0
+# Automatic maintenance — 0.7.1
 
 Start `windows\ConnectNamed.cmd` once and leave **Automatic maintenance** checked. Enable AI jobs and enter the provider and tunnel keys locally. After starting, leave the helper open and the desktop unlocked. The local automatic cycle works even while this chat is closed; it does not require you to enter test tasks or upload reports.
 
@@ -12,4 +12,4 @@ Progress is saved privately in `%LOCALAPPDATA%\AppAgent\automatic-progress.json`
 
 Automatic mode lasts up to eight hours while the helper remains open. Manual mode retains the two-hour session. STOP, hotkeys, closing the helper and expiry still cancel work. User-selected app controls remain scoped to their window/process/version and persist through worker updates, not across a stopped session. The automatic cycle does not grant itself controls in arbitrary apps, execute queued hardware/file-transfer plans, or establish universal app mastery.
 
-All 211 cloud regression tests pass. The suite exercises actual signed update verification, a real child process, local permission transfer, cancellation, rejection of altered artifacts/dependencies, startup failure fallback, idle gating and persistent failure records. Live Windows update switching and the new automatic cycle still require acceptance on the user's Windows host. Passing these tests does not complete the broader all-app goal.
+All 222 cloud regression tests pass; see CORE_TASKS.md for the new task engine checks. The suite exercises actual signed update verification, a real child process, local permission transfer, cancellation, rejection of altered artifacts/dependencies, startup failure fallback, idle gating and persistent failure records. Live Windows update switching and the new automatic cycle still require acceptance on the user's Windows host. Passing these tests does not complete the broader all-app goal.

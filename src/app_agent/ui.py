@@ -31,7 +31,7 @@ def launch_research(function):
 
 def launch(data_dir):
     root = tk.Tk()
-    root.title("App Agent — 0.6.1 Windows learning release")
+    root.title("Personal App Agent — 0.7.1")
     root.geometry("980x820")
     if not (os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")):
         key = simpledialog.askstring("Cloud AI setup", "OpenAI API key (kept in memory for this session).\nLeave blank to inspect windows without AI.", show="*", parent=root)
@@ -46,10 +46,13 @@ def launch(data_dir):
     task_permission = threading.Event()
     state = {"busy": False, "recording": False, "approval": None, "windows": [], "closing": False, "voice_timer": None, "last_scan": 0, "last_learning": 0, "learning_paused": False, "background_status": None, "research_busy": False, "practice_pending": False}
     recorder = Recorder()
+    state["voice_task_pending"] = False
     hotkey_stop = register_stop(lambda: (cancel.set(), events.put(("stop", None))), lambda text: events.put(("log", text)))
     frame = ttk.Frame(root, padding=12)
     frame.pack(fill="both", expand=True)
-    ttk.Label(frame, text="Enter a task; Automatic mode finds and opens the app. App actions still need approval.").pack(anchor="w")
+    ttk.Label(frame, text="Enter a goal. Automatic mode can choose apps, open them, and verify each task step.").pack(anchor="w")
+    autonomous_tasks = tk.BooleanVar(value=True)
+    ttk.Checkbutton(frame, text="Run submitted chat/voice tasks autonomously (task, controls and recorded commands go to the AI provider; STOP cancels)", variable=autonomous_tasks).pack(anchor="w")
     windows = ttk.Combobox(frame, state="readonly")
     windows.pack(fill="x", pady=6)
     toolbar = ttk.Frame(frame)
@@ -271,6 +274,7 @@ def launch(data_dir):
         cancel.set()
         research_cancel.set()
         state["practice_pending"] = False
+        state["voice_task_pending"] = False
         task_permission.clear()
         practice_grants.clear()
         state["learning_paused"] = True
@@ -328,14 +332,16 @@ def launch(data_dir):
         handle = state["windows"][index][0] if 0 <= index < len(state["windows"]) else None
         if mode not in ("observe", "research", "practice") and not task:
             return
-        if mode in ("run", "diagnose", "practice") and not messagebox.askokcancel("Cloud data sharing", "The task, installed app names used to choose an app, and selected-window control text will be sent to OpenAI. Automatic mode may open the chosen installed app. Avoid sensitive windows. Continue?"):
+        if mode in ("run", "diagnose", "practice") and not autonomous_tasks.get() and not messagebox.askokcancel("Cloud data sharing", "The task, installed app names used to choose an app, and selected-window control text will be sent to OpenAI. Automatic mode may open the chosen installed app. Avoid sensitive windows. Continue?"):
             return
         use_vision = vision.get() and mode in ("run", "practice")
-        if use_vision and not messagebox.askokcancel("Screenshot sharing", "Send images of the selected app window to OpenAI for this task? Images can include visible sensitive information and overlapping windows. Avoid confidential data. Coordinate clicks require your task/step authorization."):
+        if use_vision and not autonomous_tasks.get() and not messagebox.askokcancel("Screenshot sharing", "Send images of the selected app window to OpenAI for this task? Images can include visible sensitive information and overlapping windows. Avoid confidential data. Coordinate clicks require your task/step authorization."):
             return
         state["busy"] = True
         cancel.clear()
         task_permission.clear()
+        if mode == "run" and autonomous_tasks.get():
+            task_permission.set()
         status.set(f"Working: {mode}")
 
         def work():
@@ -348,6 +354,12 @@ def launch(data_dir):
                 if not apps:
                     catalog.sync(scan_apps())
                     apps = catalog.apps()
+                if mode == "run" and selected_handle is None:
+                    from .task_director import TaskDirector, resolve_window
+                    TaskDirector(catalog, CloudResearcher(), approve, emit, data_dir, cancel,
+                        resolve=lambda selected, event: resolve_window(selected, event, desktop=WindowsDesktop, launch=launch_app),
+                        runner=TaskRunner).run(task, use_vision=use_vision)
+                    return
                 if mode == "research":
                     matches = [item for item in apps if item["name"].casefold() == name.casefold()]
                     app = matches[0] if len(matches) == 1 else None
@@ -412,7 +424,11 @@ def launch(data_dir):
                 if app:
                     catalog = Catalog(data_dir)
                     try:
-                        blueprint = ensure_blueprint(catalog, app, CloudResearcher(), emit, cancel)
+                        if mode == "run":
+                            from .task_director import task_blueprint
+                            blueprint = task_blueprint(catalog, app, CloudResearcher(), emit, cancel, WindowsDesktop(selected_handle).observe())
+                        else:
+                            blueprint = ensure_blueprint(catalog, app, CloudResearcher(), emit, cancel)
                         previous = catalog.workflows(app["id"], app["generation"])
                     finally:
                         catalog.close()
@@ -485,12 +501,12 @@ def launch(data_dir):
             return
         try:
             if not state["recording"]:
-                if not messagebox.askokcancel("Voice command", "Record a command (up to 60 seconds). Audio will be sent to OpenAI when you stop. Continue?"):
+                if not autonomous_tasks.get() and not messagebox.askokcancel("Voice command", "Record a command (up to 60 seconds). Audio will be sent to OpenAI when you stop. Continue?"):
                     return
                 recorder.start()
                 state["recording"] = True
                 voice_button.configure(text="Finish recording")
-                status.set("Microphone recording — click Finish recording. Voice does not execute automatically.")
+                status.set("Microphone recording — click Finish recording. Autonomous mode runs the transcribed task.")
                 state["voice_timer"] = root.after(55000, lambda: microphone() if state["recording"] else None)
             else:
                 if state["voice_timer"]:
@@ -562,10 +578,17 @@ def launch(data_dir):
                 task_permission.clear()
                 resolve_approval(False)
                 status.set("Idle")
+                if state["voice_task_pending"]:
+                    state["voice_task_pending"] = False
+                    root.after(0, lambda: start("run") if not cancel.is_set() else None)
             elif kind == "transcript":
                 command.delete("1.0", "end")
                 command.insert("1.0", payload)
-                append("Voice transcribed. Review the command, then choose Run.")
+                if autonomous_tasks.get():
+                    append("Voice transcribed; starting the submitted task autonomously.")
+                    state["voice_task_pending"] = True
+                else:
+                    append("Voice transcribed. Review the command, then choose Run.")
             elif kind == "approval":
                 pending, action, observation = payload
                 if cancel.is_set():
@@ -590,7 +613,7 @@ def launch(data_dir):
     ttk.Spinbox(learning_bar, from_=1, to=50, textvariable=learning_limit, width=4, command=learning_settings).pack(side="left")
     ttk.Button(learning_bar, text="Apply / resume", command=learning_settings).pack(side="left", padx=5)
     ttk.Checkbutton(learning_bar, text="Auto-practice Calculator", variable=auto_practice, command=practice_settings).pack(side="left", padx=5)
-    ttk.Checkbutton(frame, text="Use selected-app screenshots for visual control (off by default; consent required)", variable=vision).pack(anchor="w")
+    ttk.Checkbutton(frame, text="Include app-window images in AI requests for visual operation", variable=vision).pack(anchor="w")
     for label, mode in (("Run task", "run"), ("Research app", "research"), ("Practice app", "practice"), ("Inspect window", "observe"), ("Troubleshoot", "diagnose")):
         ttk.Button(actions, text=label, command=lambda mode=mode: start(mode)).pack(side="left", padx=2)
     voice_button = ttk.Button(actions, text="Push-to-talk", command=microphone)

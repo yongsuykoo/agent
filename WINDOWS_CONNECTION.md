@@ -1,4 +1,4 @@
-# Connect the Windows desktop to the cloud — 0.7.0
+# Connect the Windows desktop to the cloud — 0.7.1
 
 This companion makes a temporary outbound connection from your logged-in Windows desktop. The cloud controller can then inspect apps/windows, run the automatic self-test, research apps, and request tasks in locally granted controls. It is not a desktop video stream or a remote shell.
 
@@ -6,7 +6,7 @@ This companion makes a temporary outbound connection from your logged-in Windows
 
 1. Close the old App Agent. Download the current repository ZIP and extract into a fresh folder. Run `windows\Setup.cmd`.
 2. For your own hostname, follow [NAMED_TUNNEL_SETUP.md](NAMED_TUNNEL_SETUP.md) and double-click **`windows\ConnectNamed.cmd`**. For a temporary Quick Tunnel, use **`windows\Connect.cmd`**. Both launch through Python, so PowerShell script execution is not required and its execution policy is unchanged. They install Cloudflare's `cloudflared` through WinGet when missing; WinGet's integrity checks remain enabled. No inbound firewall rule or router port-forward is created. Windows may require approval to install the package. If WinGet is unavailable, install cloudflared using the official Cloudflare Windows instructions and retry.
-3. In **App Agent connection — 0.7.0**, leave automatic tests enabled. Named mode also requires your hostname and the tunnel token entered in its masked local field. For live model tests/research, enter your OpenAI API key locally and enable the AI option. It incurs provider charges. Enable cloud app tasks if you want the controller to operate other disposable app windows after local grants.
+3. In **App Agent connection — 0.7.1**, leave automatic tests enabled. Named mode also requires your hostname and the tunnel token entered in its masked local field. For live model tests/research, enter your OpenAI API key locally and enable the AI option. It incurs provider charges. Enable cloud app tasks if you want the controller to operate other disposable app windows after local grants.
 4. Click **Start connection** and accept the displayed scope. The helper checks its local HTTP server and waits for Cloudflare to log a registered transport connection before displaying the link. Copy the **entire pairing link** and send it to this chat. The link contains the temporary relay address and the Windows session's public verification key. It contains no API key, password, or private key. Relay registration alone does not prove cloud reachability; the controller must authenticate the `/info` response.
 5. Leave the helper open and the desktop unlocked. The controller can now submit jobs and read encrypted results directly. You do not enter test commands or upload reports manually. Native tests clear Calculator and operate their own disposable Notepad document; avoid touching the desktop while they run.
 

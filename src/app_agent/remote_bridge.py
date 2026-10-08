@@ -139,7 +139,8 @@ def execute_job(job, data_dir, cancel, emit, task_permission=None):
             if grant is None or cancel.is_set():
                 raise RuntimeError("Local app-control permission was denied or cancelled.")
             cloud = CloudResearcher()
-            blueprint = ensure_blueprint(catalog, app, cloud, emit, cancel)
+            from .task_director import task_blueprint
+            blueprint = task_blueprint(catalog, app, cloud, emit, cancel, observation)
             result = TaskRunner(desktop, cloud, lambda action, snapshot: grants_action(grant, action, snapshot),
                                 emit, data_dir, cancel).run(parameters["task"], blueprint, max_steps=24,
                                 previous_workflows=catalog.workflows(app["id"], app["generation"]),

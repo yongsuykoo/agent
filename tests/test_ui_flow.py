@@ -1,6 +1,7 @@
 """Headless interface integration; native Windows control is tested separately."""
 import tempfile
 import threading
+import queue
 import unittest
 from pathlib import Path
 from unittest.mock import patch, Mock
@@ -54,6 +55,8 @@ class Root(Widget):
     def after(self, delay, function):
         self.callbacks.append((delay, function))
         return len(self.callbacks)
+    def after_cancel(self, identifier):
+        pass
     def title(self, value):
         pass
     def geometry(self, value):
@@ -84,6 +87,37 @@ class ImmediateWorker:
 
 
 class InterfaceFlowTests(unittest.TestCase):
+    def test_voice_submission_waits_for_transcription_worker_to_finish_without_a_run_click(self):
+        class VoiceRoot(Root):
+            voice_phase = False
+            def mainloop(self):
+                maintenance = next(fn for delay, fn in self.callbacks if delay == 1000)
+                self.pump = next(fn for delay, fn in self.callbacks if delay == 100)
+                maintenance();self.pump()
+                self.buttons['Push-to-talk']()
+                self.voice_phase = True
+                self.buttons['Push-to-talk']()
+                self.voice_phase = False
+                self.pump()
+                for delay, callback in list(self.callbacks):
+                    if delay == 0:callback()
+                self.pump();self.close()
+        root=VoiceRoot()
+        class DelayedCompletionQueue(queue.Queue):
+            def put(self, item, *args, **kwargs):
+                if item[0]=='done' and root.voice_phase:
+                    # Tk sees the transcript before the worker's done event.
+                    root.pump()
+                    for delay, callback in list(root.callbacks):
+                        if delay == 0:callback()
+                return super().put(item,*args,**kwargs)
+        recorder=Mock(stream=None);recorder.stop.return_value=b'voice-fixture'
+        with patch.object(ui,'Recorder',return_value=recorder), \
+             patch.object(ui,'transcribe',return_value='Calculate 23 plus 19 and verify the result.') as transcribe, \
+             patch.object(ui.queue,'Queue',DelayedCompletionQueue):
+            self.test_startup_discovery_auto_route_research_and_memory(root=root)
+        recorder.start.assert_called_once();transcribe.assert_called_once_with(b'voice-fixture')
+
     def test_documentation_worker_runs_off_the_calling_thread(self):
         started, release, completed = threading.Event(), threading.Event(), threading.Event()
         identities = []
@@ -173,10 +207,15 @@ class InterfaceFlowTests(unittest.TestCase):
             root.buttons[kwargs["text"]] = kwargs["command"]
             return Widget(*args, **kwargs)
         cloud = Mock()
-        cloud.request.return_value = {"output": [{"content": [{"type": "output_text", "text": '{"app_id":"start:calculator"}'}]}]}
+        def respond(**payload):
+            text = ('{"steps":[{"app_id":"start:calculator","task":"Calculate 23 plus 19 and verify the result.","expected_result":"42"}]}'
+                    if payload.get("text", {}).get("format", {}).get("name") == "personal_task_plan"
+                    else '{"app_id":"start:calculator"}')
+            return {"output": [{"content": [{"type": "output_text", "text": text}]}]}
+        cloud.request.side_effect = respond
         desktop = Mock()
         desktop.windows.return_value = [(10, "Calculator"), (20, "API keys - Google Chrome")]
-        desktop.return_value.observe.return_value = {"window": "Calculator", "controls": []}
+        desktop.return_value.observe.return_value = {"window": "Calculator", "window_handle": 10, "process_id": 81, "controls": []}
         runner = Mock()
         runner.return_value.run.return_value = {"task": "Calculate", "outcome": "result_observed", "actions_executed": 6, "history": [{"verification": {"window": "Calculator", "controls": []}}]}
         blueprint = {"name": "Calculator", "version": "1", "capabilities": [{"name": "Add"}]}
