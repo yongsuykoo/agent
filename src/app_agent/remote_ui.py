@@ -3,7 +3,6 @@ import json
 import os
 from pathlib import Path
 import queue
-import subprocess
 import sys
 import threading
 import time
@@ -16,6 +15,7 @@ from .remote_protocol import fingerprint
 from .research import validate_api_key
 from .connection_launcher import find_tunnel_executable
 from .relay_diagnostics import RelayDiagnostics, check_local_helper
+from .relay_launcher import start_relay, stop_relay
 
 
 def tunnel_executable():
@@ -32,7 +32,7 @@ def launch_connection(data_dir, controller_key):
     controller_fingerprint = fingerprint(public)
     executable = tunnel_executable()
     root = tk.Tk()
-    root.title("App Agent connection — 0.6.2")
+    root.title("App Agent connection — 0.6.3")
     root.geometry("900x650")
     frame = ttk.Frame(root, padding=16)
     frame.pack(fill="both", expand=True)
@@ -61,7 +61,7 @@ def launch_connection(data_dir, controller_key):
     output.pack(fill="both", expand=True, pady=8)
     events = queue.Queue()
     state = {"session": None, "server": None, "tunnel": None, "worker": None, "closed": False,
-             "disconnecting": False, "local_ok": False, "registered_once": False}
+             "disconnecting": False, "local_ok": False, "registered_once": False, "relay_directory": None}
     diagnostics = RelayDiagnostics()
     original_key = os.environ.get("AGENT_API_KEY")
     grants = {}
@@ -83,8 +83,8 @@ def launch_connection(data_dir, controller_key):
             pending["event"].set()
         if state["session"]:
             state["session"].stop()
-        if state["tunnel"] and state["tunnel"].poll() is None:
-            state["tunnel"].terminate()
+        if state["tunnel"] or state["relay_directory"]:
+            threading.Thread(target=stop_relay, args=(state["tunnel"], state["relay_directory"]), daemon=False).start()
         if state["server"]:
             def close_server():
                 state["server"].shutdown()
@@ -147,10 +147,10 @@ def launch_connection(data_dir, controller_key):
             if not state["local_ok"]:
                 raise RuntimeError("The local helper did not pass its HTTP check. Copy connection diagnostics.")
             append(f"Local helper HTTP check passed: http://127.0.0.1:{server.server_port}/info")
-            tunnel = subprocess.Popen([executable, "tunnel", "--url", f"http://127.0.0.1:{server.server_port}",
-                                       "--no-autoupdate", "--protocol", "http2"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                      text=True, encoding="utf-8", errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            tunnel, relay_directory = start_relay(executable, server.server_port)
             state["tunnel"] = tunnel
+            state["relay_directory"] = relay_directory
+            append("Relay uses an isolated temporary configuration; existing account tunnel rules are not reused.")
             started = time.monotonic()
             def read_tunnel():
                 for line in tunnel.stdout:
@@ -174,13 +174,14 @@ def launch_connection(data_dir, controller_key):
 
     def copy_diagnostics():
         server, tunnel = state["server"], state["tunnel"]
-        report = diagnostics.report("0.6.2", controller_fingerprint,
+        report = diagnostics.report("0.6.3", controller_fingerprint,
                                     server.server_port if server else None,
                                     state["local_ok"] and not state["disconnecting"],
                                     tunnel is not None and tunnel.poll() is None)
         root.clipboard_clear()
         root.clipboard_append(report)
-        append("Connection diagnostics copied. They contain no provider key or private controller identity.")
+        append(report)
+        append("The full report above is also copied to the clipboard.")
 
     start_button = ttk.Button(buttons, text="Start connection", command=start)
     start_button.pack(side="left")

@@ -1,4 +1,4 @@
-# Connect the Windows desktop to the cloud — 0.6.2
+# Connect the Windows desktop to the cloud — 0.6.3
 
 This companion makes a temporary outbound connection from your logged-in Windows desktop. The cloud controller can then inspect apps/windows, run the automatic self-test, research apps, and request tasks in locally granted controls. It is not a desktop video stream or a remote shell.
 
@@ -6,7 +6,7 @@ This companion makes a temporary outbound connection from your logged-in Windows
 
 1. Close the old App Agent. Download the current repository ZIP and extract into a fresh folder. Run `windows\Setup.cmd`.
 2. Double-click **`windows\Connect.cmd`**. Version 0.6.1 launches through Python, so PowerShell script execution is not required and its execution policy is unchanged. It installs Cloudflare's `cloudflared` through WinGet when missing; WinGet's integrity checks remain enabled. The connection uses Cloudflare's temporary Quick Tunnel service. No inbound firewall rule or router port-forward is created. Windows may require approval to install the package. If WinGet is unavailable, install cloudflared using the official Cloudflare Windows instructions and retry.
-3. In **App Agent connection — 0.6.2**, leave automatic tests enabled. For live model tests/research, enter your OpenAI API key locally and enable the AI option. It incurs provider charges. Enable cloud app tasks if you want the controller to operate other disposable app windows after local grants.
+3. In **App Agent connection — 0.6.3**, leave automatic tests enabled. For live model tests/research, enter your OpenAI API key locally and enable the AI option. It incurs provider charges. Enable cloud app tasks if you want the controller to operate other disposable app windows after local grants.
 4. Click **Start connection** and accept the displayed scope. The helper checks its local HTTP server and waits for Cloudflare to log a registered transport connection before displaying the link. Copy the **entire pairing link** and send it to this chat. The link contains the temporary relay address and the Windows session's public verification key. It contains no API key, password, or private key. Relay registration alone does not prove cloud reachability; the controller must authenticate the `/info` response.
 5. Leave the helper open and the desktop unlocked. The controller can now submit jobs and read encrypted results directly. You do not enter test commands or upload reports manually. Native tests clear Calculator and operate their own disposable Notepad document; avoid touching the desktop while they run.
 
@@ -16,7 +16,9 @@ The connection expires after two hours. **STOP / disconnect**, Escape, Ctrl+Alt+
 
 ## Diagnose a connection failure
 
-Click **Copy connection diagnostics** and paste the report into the testing chat. It includes the local startup check, relay process status, public relay URL, registration count and the latest 12 redacted relay log lines. It contains no provider key, private controller identity or app/window contents. Copy it before closing the helper, especially when registration times out after 90 seconds.
+Click **Copy connection diagnostics** and paste the report into the testing chat. Version 0.6.3 also shows the full report in the white log box, so it can be read or captured there when clipboard transfer is confusing. It includes the local startup check, relay process status, public relay URL, registration count and the latest 12 redacted relay log lines. It contains no provider key, private controller identity or app/window contents. Copy it before closing the helper, especially when registration times out after 90 seconds.
+
+Cloudflared parses configuration-file routing before its CLI origin ([official source](https://github.com/cloudflare/cloudflared/blob/master/ingress/ingress.go)). The helper now passes its own temporary empty YAML configuration and fixed loopback `--url`, excluding unrelated tunnel settings from that child process. This prevents inherited account routing from choosing another origin or a 404 catch-all. It does not change or delete existing Cloudflare configuration or disable TLS verification, and does not prove that inherited routing caused the reported 404. The temporary file is removed after the relay exits.
 
 Opening the public URL with `/info` appended in a browser should return `{"error":"Request rejected. Check pairing, request signature, clock and size."}` with HTTP 403. That is the normal response to an unsigned browser request; it does not authenticate the server. A browser 404 instead indicates that the requested URL did not serve this helper endpoint. A DNS NXDOMAIN indicates a missing hostname. A plain-text `Your request was blocked.` response differs from the helper rejection and does not establish a credential or controller-key problem. Compare these responses with the helper diagnostics before changing network settings or restarting repeatedly.
 
