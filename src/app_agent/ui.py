@@ -32,7 +32,7 @@ def launch_research(function):
 
 def launch(data_dir):
     root = tk.Tk()
-    root.title("Personal App Agent — 0.9.0")
+    root.title("Personal App Agent — 0.10.0")
     root.geometry("980x820")
     if not (os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")):
         key = simpledialog.askstring("Cloud AI setup", "OpenAI API key (kept in memory for this session).\nLeave blank to inspect windows without AI.", show="*", parent=root)
@@ -49,6 +49,8 @@ def launch(data_dir):
     recorder = Recorder()
     from .inventory_events import InventoryEvents
     inventory_events = InventoryEvents()
+    from .installation_watch import InstallationMonitor
+    installation_monitor=InstallationMonitor(data_dir,lambda text:events.put(('log',text)))
     state["voice_task_pending"] = False
     hotkey_stop = register_stop(lambda: (cancel.set(), events.put(("stop", None))), lambda text: events.put(("log", text)))
     frame = ttk.Frame(root, padding=12)
@@ -122,6 +124,7 @@ def launch(data_dir):
         state["busy"] = True
         state["last_scan"] = time.monotonic()
         inventory_events.scanned()
+        installation_monitor.scanned()
         status.set("Reading Windows and installed application evidence")
         def work():
             catalog = Catalog(data_dir)
@@ -576,6 +579,7 @@ def launch(data_dir):
     def close():
         stop()
         inventory_events.close()
+        installation_monitor.close()
         if recorder.stream:
             recorder.stream.stop()
             recorder.stream.close()
@@ -770,7 +774,7 @@ def launch(data_dir):
     def maintenance():
         if state["closing"]:
             return
-        changed = inventory_events.poll()
+        changed = inventory_events.poll() or installation_monitor.poll()
         if not state["busy"] and not state["recording"]:
             if changed or time.monotonic() - state["last_scan"] > 300:
                 scan_inventory()

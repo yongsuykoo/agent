@@ -28,6 +28,14 @@ class Catalog:
         CREATE TABLE IF NOT EXISTS local_evidence (app_id TEXT NOT NULL, generation INTEGER NOT NULL,
           body TEXT NOT NULL, observed TEXT NOT NULL, PRIMARY KEY(app_id,generation));
         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS knowledge_nodes (id TEXT PRIMARY KEY, kind TEXT NOT NULL, label TEXT NOT NULL,
+          search_text TEXT NOT NULL, app_id TEXT, generation INTEGER, level TEXT NOT NULL, body TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS knowledge_edges (source TEXT NOT NULL, relation TEXT NOT NULL, target TEXT NOT NULL,
+          PRIMARY KEY(source,relation,target));
+        CREATE INDEX IF NOT EXISTS knowledge_owner ON knowledge_nodes(app_id,generation);
+        CREATE TABLE IF NOT EXISTS installation_candidates (id TEXT PRIMARY KEY, metadata TEXT NOT NULL,
+          state TEXT NOT NULL, study_status TEXT NOT NULL DEFAULT 'queued', blueprint TEXT, retry_at TEXT,
+          first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, app_id TEXT);
         CREATE TABLE IF NOT EXISTS interfaces (app_id TEXT NOT NULL, generation INTEGER NOT NULL, body TEXT NOT NULL,
           observed TEXT NOT NULL, PRIMARY KEY(app_id,generation));
         CREATE TABLE IF NOT EXISTS practice_attempts (app_id TEXT NOT NULL, generation INTEGER NOT NULL,
@@ -51,6 +59,10 @@ class Catalog:
     def set_setting(self, key, value):
         with self.db:
             self.db.execute("INSERT INTO settings VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, json.dumps(value)))
+            if key=='machine_model':self.dirty_knowledge()
+
+    def dirty_knowledge(self):
+        self.db.execute("INSERT INTO settings VALUES ('knowledge_revision','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1")
 
     def consume_budget(self, key, limit):
         """Reserve an attempt atomically. Zero means no daily application cap."""
@@ -87,6 +99,7 @@ class Catalog:
         seen = set()
         timestamp = now()
         with self.db:
+            self.dirty_knowledge()
             for app in snapshot["apps"]:
                 identity = app["id"]
                 seen.add(identity)
@@ -157,6 +170,8 @@ class Catalog:
     def save_blueprint(self, identity, generation, blueprint):
         with self.db:
             cursor = self.db.execute("UPDATE apps SET blueprint=?,status='documented',error=NULL,attempts=0,retry_at=NULL WHERE id=? AND generation=? AND present=1", (json.dumps(blueprint), identity, generation))
+            if cursor.rowcount:
+                self.dirty_knowledge()
         return cursor.rowcount == 1
 
     def fail_research(self, identity, generation, error):
@@ -174,6 +189,7 @@ class Catalog:
             if not current or not current["present"] or current["generation"] != generation:
                 return False
             self.db.execute("INSERT INTO workflows (app_id,generation,task,outcome,record,created) VALUES (?,?,?,?,?,?)", (identity, generation, record["task"], record["outcome"], json.dumps(record), now()))
+            self.dirty_knowledge()
         return True
 
     def save_artifact_workflow(self, identity, generation, record):
@@ -185,6 +201,7 @@ class Catalog:
                 return False
             self.db.execute('INSERT INTO artifact_workflows (app_id,generation,task,record,created) VALUES (?,?,?,?,?)',
                 (identity, generation, record['task'], json.dumps(record), now()))
+            self.dirty_knowledge()
         return True
 
     def artifact_recipe(self, identity, generation, task):
@@ -203,6 +220,7 @@ class Catalog:
     def save_interface(self, identity, generation, observation):
         with self.db:
             self.db.execute("INSERT INTO interfaces VALUES (?,?,?,?) ON CONFLICT(app_id,generation) DO UPDATE SET body=excluded.body,observed=excluded.observed", (identity, generation, json.dumps(observation), now()))
+            self.dirty_knowledge()
 
     def interface(self, identity, generation):
         row = self.db.execute("SELECT body FROM interfaces WHERE app_id=? AND generation=?", (identity, generation)).fetchone()

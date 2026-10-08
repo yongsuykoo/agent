@@ -50,7 +50,16 @@ def study_campaign(catalog, cloud, emit, daily_limit=50, max_apps=5, max_plans=3
     research, planning = [], []
     status = "progress"
     from .parallel_study import study_batch
-    research, status = study_batch(catalog, cloud, emit, daily_limit, max_apps, research_workers, cancel)
+    from .installation_watch import study_preview
+    preview=study_preview(catalog,cloud,emit,daily_limit,cancel) if max_apps else {'status':'no_candidate'}
+    attempted=preview['status'] in ('preview_documented','preview_failed')
+    if attempted:research.append(preview)
+    if preview['status']=='cancelled' or cloud_blocked(preview.get('error','')):
+        status='cancelled' if preview['status']=='cancelled' else 'cloud_blocked'
+    else:
+        batch,status=study_batch(catalog,cloud,emit,daily_limit,max_apps-int(attempted),research_workers,cancel)
+        research.extend(batch)
+        if attempted and status=='queue_empty':status='progress'
     if status == "queue_empty" and max_apps:
         result = deepen_next(catalog, cloud, emit, daily_limit, cancel)
         research.append(result)

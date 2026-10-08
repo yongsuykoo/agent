@@ -2,6 +2,7 @@
 import json
 import re
 import subprocess
+import ntpath
 from .discovery import normalized_name
 from .research import output_text
 
@@ -45,7 +46,36 @@ def window_matches(app, windows):
             and matches(title)]
 
 
+def identify_windows(app, windows, desktop):
+    matches=window_matches(app,windows)
+    if matches or app.get('system_surface')=='control_panel':
+        return matches
+    # Unknown document titles can be matched to registered full executable
+    # identities. A basename, title guess or unavailable process is insufficient.
+    inspect=getattr(desktop,'executable',None)
+    if not callable(inspect):return []
+    paths={ntpath.normcase(ntpath.normpath(p)) for p in [*app.get('executables',[]),app.get('launch_executable','')]
+           if isinstance(p,str) and ntpath.isabs(p)}
+    if not paths:return []
+    found=[]
+    for handle,title in windows:
+        if any(term in title.casefold() for term in ('api keys','password','sign in','log in')):continue
+        try:path=inspect(handle)
+        except (OSError,RuntimeError):continue
+        if app.get('system_surface')=='file_explorer':
+            window_class=getattr(desktop,'window_class',None)
+            try:
+                if not callable(window_class) or window_class(handle)!='CabinetWClass':continue
+            except (OSError,RuntimeError):continue
+        if isinstance(path,str) and ntpath.normcase(ntpath.normpath(path)) in paths:found.append((handle,title))
+    return found
+
+
 def launch_app(app):
+    if app.get('source')=='windows_surface' and app.get('id')=='system:'+str(app.get('system_surface')):
+        from .system_surfaces import launch_surface
+        launch_surface(app['system_surface'])
+        return
     app_id = app.get("app_id", "")
     if not app_id and app.get('launch_source') == 'app_paths':
         from pathlib import Path

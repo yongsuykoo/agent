@@ -25,6 +25,9 @@ def main():
     automatic.add_argument("--with-cloud", action="store_true", help="Also run AI tasks; prompts securely for a missing API key")
     commands.add_parser("scan", help="Discover apps and persist installation/version changes")
     commands.add_parser("machine-report", help="Show local Windows, app-interface and installation evidence")
+    commands.add_parser("knowledge-map", help="Show the versioned system/app evidence graph")
+    query=commands.add_parser("knowledge-query", help="Retrieve local evidence relevant to a task; no provider calls")
+    query.add_argument("task")
     commands.add_parser("apps", help="List discovered apps and documentation status")
     study = commands.add_parser("study-next", help="Research one queued app within the daily background budget")
     study.add_argument("--daily-limit", type=int, default=0, choices=range(0, 10001))
@@ -79,7 +82,7 @@ def main():
         elif args.command in ("doctor", "windows-smoke"):
             from .windows_checks import doctor, calculator_smoke
             result = doctor() if args.command == "doctor" else calculator_smoke()
-        elif args.command in ("scan", "apps", "study-next", "study-campaign", "learning-report", "machine-report"):
+        elif args.command in ("scan", "apps", "study-next", "study-campaign", "learning-report", "machine-report", "knowledge-map", "knowledge-query"):
             catalog = Catalog(args.data_dir)
             try:
                 if args.command == "scan":
@@ -88,6 +91,9 @@ def main():
                     result = [{key: value for key, value in app.items() if key not in ("blueprint", "location")} for app in catalog.apps()]
                 elif args.command == "machine-report":
                     result = machine_report(catalog)
+                elif args.command in ('knowledge-map','knowledge-query'):
+                    from .system_knowledge import graph_report, retrieve
+                    result=graph_report(catalog) if args.command=='knowledge-map' else retrieve(catalog,args.task)
                 elif args.command == "learning-report":
                     result = {"overview": catalog.learning_overview(), "machine": machine_report(catalog), "campaign": catalog.setting("campaign_state", {})}
                 elif args.command == "study-campaign":

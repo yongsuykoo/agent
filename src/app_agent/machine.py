@@ -72,6 +72,17 @@ def enrich_inventory(snapshot, probe):
     if not any('App Paths' in w for w in probe.get('warnings', [])):
         complete.add('app_paths')
     if os.get('build'):
+        from .system_surfaces import SURFACES
+        for entry in probe.get('system_surfaces',[]):
+            surface=entry.get('id')
+            if surface not in SURFACES:continue
+            name,aliases=SURFACES[surface]
+            # Keep OS surfaces separate: they have fixed launch routes and an
+            # OS-build generation, even when a Start-menu entry also exists.
+            apps.append({'id':'system:'+surface,'name':name,'aliases':aliases,'version':str(os['build']),
+                         'publisher':'Microsoft','source':'windows_surface','system_surface':surface,'app_id':'',
+                         'executables':[entry['executable']] if entry.get('executable') else [],'location':''})
+        if 'system_surfaces' in probe:complete.add('windows_surface')
         apps.append({'id': 'system:windows', 'name': 'Microsoft Windows', 'role': 'platform', 'source': 'windows_system',
                      'version': str(os['build']), 'publisher': 'Microsoft', 'app_id': '', 'location': '',
                      'aliases': ['Windows'], 'help_url': 'https://learn.microsoft.com/windows/'})
@@ -138,6 +149,8 @@ def onboard_snapshot(snapshot, catalog, probe, cancel=None):
                              'Registrations and static files do not prove that an operation works.',
                              'Windows build, service and registration metadata are not a complete operating-system blueprint.']}
     changes = catalog.sync({**enriched, 'machine': system, 'local_evidence': evidence})
+    from .installation_watch import reconcile
+    reconcile(catalog)
     import tempfile
     with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.tmp', dir=catalog.data_dir, delete=False) as stream:
         temporary = Path(stream.name)
@@ -194,6 +207,7 @@ def research_context(catalog, app):
 
 
 def machine_report(catalog):
+    from .system_knowledge import graph_report
     apps = catalog.apps()
     entries = []
     for app in apps:
@@ -203,7 +217,7 @@ def machine_report(catalog):
         artifacts = catalog.db.execute('SELECT COUNT(*) FROM artifact_workflows WHERE app_id=? AND generation=?', (app['id'], app['generation'])).fetchone()[0]
         entries.append({'app_id': app['id'], 'name': app['name'], 'version': app.get('version', ''),
                         'generation': app['generation'], 'role': app.get('role', 'application'),
-                        'launchable': bool(app.get('app_id') or app.get('launch_executable')),
+                        'launchable': bool(app.get('app_id') or app.get('launch_executable') or app.get('system_surface')),
                         'inspection': evidence.get('status') if evidence else 'system_metadata_observed' if app.get('role') == 'platform' else 'not_inspected',
                         'inspection_complete': evidence.get('complete', False) if evidence else False,
                         'local_manuals': len((evidence or {}).get('manuals', [])),
@@ -213,6 +227,8 @@ def machine_report(catalog):
                         'verified_artifact_workflows': artifacts,
                         'warnings': (evidence or {}).get('warnings', [])})
     result = {'machine': catalog.setting('machine_model', {}), 'apps': entries,
+              'knowledge_graph':graph_report(catalog,include_nodes=False),
+              'installation_monitor':catalog.setting('installation_monitor',{}),
               'summary': {'entries': len(entries), 'locally_inspected': sum(bool(catalog.local_evidence(a['id'], a['generation'])) for a in apps),
                           'documented': sum(bool(a['blueprint']) for a in apps),
                           'with_observed_capabilities': sum(e['observed_capabilities'] > 0 for e in entries),
@@ -235,7 +251,7 @@ def installed_research_options(catalog, app):
 
 def observe_running_interfaces(catalog, desktop, cancel=None):
     """Read already open, uniquely matched windows; never launch/focus/type."""
-    from .routing import window_matches
+    from .routing import identify_windows
     saved = []
     try:
         windows = desktop.windows()
@@ -246,7 +262,7 @@ def observe_running_interfaces(catalog, desktop, cancel=None):
             break
         if app.get('role') == 'platform':
             continue
-        matches = window_matches(app, windows)
+        matches = identify_windows(app, windows, desktop)
         if len(matches) != 1:
             continue
         try:

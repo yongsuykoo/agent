@@ -102,7 +102,41 @@ def window_process_id(handle):
     return process.value
 
 
+def window_process_executable(handle):
+    """Read the executable of one current window, without command arguments."""
+    if sys.platform != 'win32':
+        raise RuntimeError('Process identity requires Windows.')
+    import ctypes
+    from ctypes import wintypes
+    kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+    kernel.OpenProcess.argtypes=[wintypes.DWORD,wintypes.BOOL,wintypes.DWORD]
+    kernel.OpenProcess.restype=wintypes.HANDLE
+    kernel.QueryFullProcessImageNameW.argtypes=[wintypes.HANDLE,wintypes.DWORD,wintypes.LPWSTR,ctypes.POINTER(wintypes.DWORD)]
+    kernel.QueryFullProcessImageNameW.restype=wintypes.BOOL
+    kernel.CloseHandle.argtypes=[wintypes.HANDLE]
+    kernel.CloseHandle.restype=wintypes.BOOL
+    process=kernel.OpenProcess(0x1000,False,window_process_id(handle))
+    if not process:return None
+    try:
+        buffer=ctypes.create_unicode_buffer(32768);length=wintypes.DWORD(len(buffer))
+        return buffer.value if kernel.QueryFullProcessImageNameW(process,0,buffer,ctypes.byref(length)) else None
+    finally:kernel.CloseHandle(process)
+
+
+def window_class_name(handle):
+    if sys.platform!='win32':raise RuntimeError('Window class requires Windows.')
+    import ctypes
+    from ctypes import wintypes
+    user32=ctypes.WinDLL('user32',use_last_error=True)
+    user32.GetClassNameW.argtypes=[wintypes.HWND,wintypes.LPWSTR,ctypes.c_int]
+    user32.GetClassNameW.restype=ctypes.c_int
+    value=ctypes.create_unicode_buffer(256)
+    return value.value if user32.GetClassNameW(handle,value,len(value)) else None
+
+
 class WindowsDesktop:
+    executable=staticmethod(window_process_executable)
+    window_class=staticmethod(window_class_name)
     def __init__(self, handle):
         if sys.platform != "win32":
             raise RuntimeError("Desktop control requires an interactive Windows session.")

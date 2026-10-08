@@ -1,5 +1,7 @@
 # Evidence for the personal-agent goal
 
+Version 0.10.0 adds the general system evidence graph, task-relevant retrieval, installer lifecycle monitoring and provisional public study, registration reconciliation, executable-based window identification and fixed Windows GUI surfaces. The 305 cloud checks cover lifecycle failures, current-generation provenance, privacy, OS cache invalidation and general task execution. Native Windows acceptance of these new mechanisms remains pending. See SYSTEM_AGENT.md. These mechanisms apply across discovered software; they do not establish complete source knowledge or all-app mastery.
+
 Version 0.9.0 adds a documented Photoshop logo adapter with declarative planning, file verification and versioned recipe reuse. Its 276 cloud checks and 14 Adobe DOM scenarios simulate Photoshop/COM and use real temporary file-verification fixtures. Native Photoshop/CS2 rendering, visual quality, other creative applications and broad all-app mastery remain unverified. See CREATIVE_TASKS.md. No goal percentage is inferred from these counts.
 
 Version 0.7.2 adds parallel research, optional uncapped daily usage, guarded local replay/cached plans, and Windows registry notifications. All 237 cloud checks pass; the repeated two-app simulation uses zero model calls after five initially. Native notifications, real installation adaptation and Windows latency remain unverified. See PERFORMANCE.md; this release does not complete the universal goal.

@@ -7,7 +7,10 @@ import sys
 # lines, account names, product keys, credentials or service executable arguments.
 PROBE = r'''
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-$warnings = @(); $os = @{}; $paths = @(); $com = @(); $services = @(); $extensions = @()
+$warnings = @(); $os = @{}; $paths = @(); $com = @(); $services = @(); $extensions = @(); $surfaces = @()
+foreach ($surface in @(@{id='settings';file="$env:windir\ImmersiveControlPanel\SystemSettings.exe"},@{id='file_explorer';file="$env:windir\explorer.exe"},@{id='task_manager';file="$env:windir\System32\taskmgr.exe"},@{id='control_panel';file="$env:windir\System32\control.exe"})) {
+  if (Test-Path -LiteralPath $surface.file -PathType Leaf) { $surfaces += @{id=$surface.id; executable=$surface.file} }
+}
 try {
   $v = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction Stop
   $arch = $env:PROCESSOR_ARCHITEW6432; if (-not $arch) { $arch = $env:PROCESSOR_ARCHITECTURE }
@@ -42,7 +45,7 @@ try {
 } catch { $warnings += 'Some class registrations could not be inspected.' }
 try { $services = @(Get-Service -ErrorAction Stop | Select-Object -First 2000 | ForEach-Object { @{name=$_.Name; display_name=$_.DisplayName; status=$_.Status.ToString(); start_type=$_.StartType.ToString()} }) }
 catch { $warnings += 'Service state inspection unavailable.' }
-@{os=$os; app_paths=$paths; com_servers=$com; file_types=$extensions; services=$services; warnings=$warnings} | ConvertTo-Json -Depth 6 -Compress
+@{os=$os; app_paths=$paths; com_servers=$com; file_types=$extensions; services=$services; system_surfaces=$surfaces; warnings=$warnings} | ConvertTo-Json -Depth 6 -Compress
 '''
 
 

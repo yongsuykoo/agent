@@ -22,12 +22,14 @@ def idle_seconds():
 
 
 class Maintenance:
-    def __init__(self, directory, enabled=True, emit=print):
+    def __init__(self, directory, enabled=True, emit=print, monitor_installations=False):
         self.path = Path(directory) / 'automatic-progress.json'
         self.enabled, self.emit = enabled, emit
         self.pending = None
         from .inventory_events import InventoryEvents
         self.inventory_events = InventoryEvents()
+        from .installation_watch import InstallationMonitor
+        self.installation_monitor=InstallationMonitor(directory,emit) if monitor_installations else None
         self.next_inventory, self.next_study = 0, 0
         try:
             self.state = json.loads(self.path.read_text(encoding='utf-8'))
@@ -46,7 +48,7 @@ class Maintenance:
         if not self.enabled or not session.active():
             return
         now = time.monotonic()
-        if self.inventory_events.poll():
+        if self.inventory_events.poll() or (self.installation_monitor and self.installation_monitor.poll()):
             self.next_inventory = 0
         if self.pending:
             identity, operation, test_key, started_version = self.pending
@@ -80,6 +82,7 @@ class Maintenance:
             operation, parameters = 'inventory', {}
             self.next_inventory = now + 300
             self.inventory_events.scanned()
+            if self.installation_monitor:self.installation_monitor.scanned()
         elif session.allow_tests and idle >= 60 and entry['attempts'] < 2 and not entry['failed']:
             operation, parameters = 'self_test', {'with_cloud': session.allow_cloud, 'with_voice': session.allow_cloud}
             entry['attempts'] += 1
@@ -100,3 +103,4 @@ class Maintenance:
 
     def close(self):
         self.inventory_events.close()
+        if self.installation_monitor:self.installation_monitor.close()
