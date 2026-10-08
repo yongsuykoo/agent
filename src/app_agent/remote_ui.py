@@ -178,6 +178,8 @@ def launch_connection(data_dir, controller_key):
                                     server.server_port if server else None,
                                     state["local_ok"] and not state["disconnecting"],
                                     tunnel is not None and tunnel.poll() is None)
+        if link.get():
+            report += "\nPublic pairing link: " + link.get()
         root.clipboard_clear()
         root.clipboard_append(report)
         append(report)
