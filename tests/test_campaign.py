@@ -70,7 +70,7 @@ class CampaignTests(unittest.TestCase):
 
     def test_auth_failure_stops_batch_and_throttles_retry(self):
         with patch("app_agent.learning.research_app", side_effect=RuntimeError("Cloud request failed (HTTP 401)")) as research:
-            result = self.run_campaign(max_apps=5)
+            result = self.run_campaign(max_apps=5, research_workers=1)
             self.assertEqual(result["status"], "cloud_blocked")
             retry = self.run_campaign(max_apps=5)
             self.assertEqual(retry["status"], "waiting_for_cloud_retry")

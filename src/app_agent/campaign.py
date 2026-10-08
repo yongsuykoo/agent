@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from .app_practice import consume_practice_budget
-from .learning import deepen_next, learn_next, practice_task
+from .learning import deepen_next, practice_task
 from .runner import TaskRunner
 
 
@@ -13,15 +13,7 @@ def cloud_blocked(error):
 
 
 def consume_planning_budget(catalog, limit):
-    day = datetime.now().astimezone().date().isoformat()
-    budget = catalog.setting("planning_budget", {"day": day, "used": 0})
-    if budget["day"] != day:
-        budget = {"day": day, "used": 0}
-    if budget["used"] >= limit:
-        return False
-    budget["used"] += 1
-    catalog.set_setting("planning_budget", budget)
-    return True
+    return catalog.consume_budget("planning_budget", limit) is not None
 
 
 def prepare_next_experiment(catalog, app, cloud, emit, daily_limit=50, cancel=None):
@@ -48,28 +40,21 @@ def prepare_next_experiment(catalog, app, cloud, emit, daily_limit=50, cancel=No
         return {"status": "cloud_blocked" if cloud_blocked(error) else "experiment_deferred", "error": str(error)}
 
 
-def study_campaign(catalog, cloud, emit, daily_limit=50, max_apps=5, max_plans=3, cancel=None):
-    if not 1 <= daily_limit <= 50 or not 0 <= max_apps <= 50 or not 0 <= max_plans <= 50:
-        raise ValueError("Campaign limits must be between 0 and 50 (daily limit at least 1).")
+def study_campaign(catalog, cloud, emit, daily_limit=50, max_apps=5, max_plans=3, cancel=None, research_workers=3):
+    if any(type(value) is not int for value in (daily_limit, max_apps, max_plans, research_workers)) or daily_limit < 0 or not 0 <= max_apps <= 50 or not 0 <= max_plans <= 50 or not 1 <= research_workers <= 4:
+        raise ValueError("Zero daily usage is uncapped; batches are 0–50 and parallel workers 1–4.")
     previous = catalog.setting("campaign_state", {})
     timestamp = datetime.now(timezone.utc).isoformat()
     if previous.get("retry_at") and previous["retry_at"] > timestamp:
         return {"status": "waiting_for_cloud_retry", "overview": catalog.learning_overview()}
     research, planning = [], []
     status = "progress"
-    for _ in range(max_apps):
-        result = learn_next(catalog, cloud, emit, daily_limit, cancel)
-        if result["status"] == "queue_empty":
-            result = deepen_next(catalog, cloud, emit, daily_limit, cancel)
+    from .parallel_study import study_batch
+    research, status = study_batch(catalog, cloud, emit, daily_limit, max_apps, research_workers, cancel)
+    if status == "queue_empty" and max_apps:
+        result = deepen_next(catalog, cloud, emit, daily_limit, cancel)
         research.append(result)
-        if result["status"] in ("cancelled", "daily_limit", "queue_empty", "documentation_wait"):
-            status = result["status"]
-            break
-        if cloud_blocked(result.get("error", "")):
-            status = "cloud_blocked"
-            break
-        catalog.set_setting("campaign_state", {"status": "running", "updated": timestamp,
-                                               "research": research, "planning": planning})
+        status = "cloud_blocked" if cloud_blocked(result.get("error", "")) else result['status']
     if status not in ("cancelled", "cloud_blocked"):
         priority = set(catalog.setting("priority_apps", []))
         for _ in range(max_plans):

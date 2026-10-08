@@ -115,6 +115,19 @@ def observed_results(observation, result_control_id=None):
             and (not result_control_id or item.get("automation_id") == result_control_id)][:12]
 
 
+def result_matches(observation, expected_text, exact_goal=None, result_control_id=None):
+    if exact_goal is not None:
+        return any(c.get('value') == exact_goal for c in observation['controls']
+                   if c['visible'] and not c.get('password') and c['type'] in ('Edit', 'Document'))
+    values = [c['name']+' '+c.get('value', '') for c in observation['controls']
+              if c['visible'] and not c.get('password') and c['type'] in ('Text', 'Edit', 'Document')
+              and (not result_control_id or c.get('automation_id') == result_control_id)]
+    if re.fullmatch(r'[-+]?\d+(?:\.\d+)?', expected_text):
+        return any((re.findall(r'[-+]?\d+(?:[.,]\d+)?', value) == [expected_text])
+                   if result_control_id else expected_text in re.findall(r'[-+]?\d+(?:[.,]\d+)?', value) for value in values)
+    return any(expected_text.casefold() in value.casefold() for value in values)
+
+
 class TaskRunner:
     def __init__(self, desktop, cloud, approve, emit, data_dir, cancel=None):
         self.desktop, self.cloud = desktop, cloud
@@ -130,7 +143,20 @@ class TaskRunner:
         failures = 0
         no_effect = {}
         outcome = "step_limit"
+        execution_mode = 'cloud'
         try:
+            from .workflow_replay import replay
+            cached = replay(task, previous_workflows or [], self.desktop, self.approve, self.cancel, self.emit,
+                            required_result_text, result_control_id, max_steps, effect_timeout) if previous_workflows and not use_vision else None
+            if cached:
+                history.extend(cached['history'])
+                actions_executed = cached['actions_executed']
+                execution_mode = 'local_replay' if cached['outcome'] != 'fallback' else 'mixed'
+                if cached['outcome'] != 'fallback':
+                    outcome = cached['outcome']
+                    max_steps = 0
+                else:
+                    max_steps = max(0, max_steps-actions_executed)
             for step in range(max_steps):
                 if self.cancel.is_set():
                     outcome = "cancelled"
@@ -140,7 +166,7 @@ class TaskRunner:
                 if image:
                     observation["viewport"] = {key: value for key, value in image.items() if key != "data_url"}
                 self.emit(f"Step {step + 1}: observing {observation['window']}")
-                prompt = json.dumps({"task": task, "blueprint": blueprint, "previous_workflows": previous_workflows or [], "observation": observation,
+                prompt = json.dumps({"task": task, "blueprint": blueprint, "previous_workflows": [{k:v for k,v in w.items() if k != 'recipe'} for w in previous_workflows or []], "observation": observation,
                                       "required_exact_editor_text": exact_goal,
                                       "required_result_text": required_result_text,
                                       "result_control_id": result_control_id,
@@ -191,18 +217,7 @@ class TaskRunner:
                     expected = expected_text.casefold()
                     # Re-observe: do not rely on the model's completion claim.
                     current = self.desktop.observe()
-                    matched = any(expected in (item["name"] + " " + item.get("value", "")).casefold() for item in current["controls"]
-                                  if item["visible"] and item.get("type") in ("Text", "Edit", "Document"))
-                    if result_control_id:
-                        values = [item["name"] + " " + item.get("value", "") for item in current["controls"]
-                                  if item["visible"] and item.get("automation_id") == result_control_id]
-                        if re.fullmatch(r"[-+]?\d+(?:\.\d+)?", expected_text):
-                            matched = any(re.findall(r"[-+]?\d+(?:[.,]\d+)?", value) == [expected_text] for value in values)
-                        else:
-                            matched = any(expected in value.casefold() for value in values)
-                    if exact_goal is not None:
-                        matched = any(item.get("value") == exact_goal for item in current["controls"]
-                                      if item["visible"] and item.get("type") in ("Edit", "Document"))
+                    matched = result_matches(current, expected_text, exact_goal, result_control_id)
                     outcome = "result_observed" if matched else "verification_failed"
                     history.append({"verification": current, "expected_text": expected_text, "matched": matched})
                     if not matched and image and exact_goal is None and not result_control_id:
@@ -289,7 +304,9 @@ class TaskRunner:
             history.append({"error": str(error)})
         self.data_dir.mkdir(parents=True, exist_ok=True)
         record = {"task": task, "outcome": outcome, "history": history, "actions_executed": actions_executed,
-                  "time": datetime.now(timezone.utc).isoformat()}
+                  "time": datetime.now(timezone.utc).isoformat(), "execution_mode": execution_mode}
+        from .workflow_replay import compile_recipe
+        record['replay_recipe'] = compile_recipe(record, result_control_id)
         with (self.data_dir / "sessions.jsonl").open("a", encoding="utf-8") as file:
             file.write(json.dumps(record) + "\n")
         self.emit(f"Outcome: {outcome}. Actions executed by agent: {actions_executed}. Session evidence saved locally.")

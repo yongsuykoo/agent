@@ -5,6 +5,8 @@ import json
 import os
 import re
 import socket
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from urllib.error import HTTPError, URLError
@@ -12,6 +14,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request, build_opener, HTTPRedirectHandler, getproxies, proxy_bypass
 
 MAX_BYTES = 1_000_000
+DOCUMENT_SLOTS = threading.BoundedSemaphore(4)
 CAPABILITY_PROPERTIES = {
     "name": {"type": "string"}, "expected_result": {"type": "string"},
     "source_ids": {"type": "array", "items": {"type": "integer"}},
@@ -118,6 +121,18 @@ def validate_api_key(key):
     if any(character.isspace() for character in key) or not key.isascii() or not key.isprintable():
         raise RuntimeError("Invalid API-key input: keys must be a single line without spaces. Enter the key from your OpenAI API account, not an error message. The entered value has not been displayed or saved.")
     return key
+
+
+class DeferredCloud:
+    """Do not require credentials or construct a provider client for local replay."""
+    def __init__(self, factory):
+        self.factory = factory
+        self.client = None
+
+    def request(self, **payload):
+        if self.client is None:
+            self.client = self.factory()
+        return self.client.request(**payload)
 
 
 class CloudResearcher:
@@ -254,11 +269,17 @@ def research_app(name, version, researcher, urls=None, fetcher=fetch_document, f
     if len(sources) > 5:
         raise ValueError("Research supports at most five source pages per run.")
     documents, failures = [], []
-    for url in sources:
+    def retrieve(url):
         try:
-            documents.append(fetcher(url))
+            with DOCUMENT_SLOTS:
+                return fetcher(url), None
         except (ValueError, RuntimeError, OSError) as error:
-            failures.append(str(error))
+            return None, str(error)
+    # Preserve citation indices in source order regardless of completion order.
+    with ThreadPoolExecutor(max_workers=min(3, max(1, len(sources))), thread_name_prefix='manual-page') as pool:
+        for document, error in pool.map(retrieve, sources):
+            if document is not None:documents.append(document)
+            if error is not None:failures.append(error)
     if not documents:
         raise RuntimeError("No documentation could be retrieved. " + " ".join(failures))
     extracted = (researcher.extract(name, version, documents, known_capabilities=known_capabilities)

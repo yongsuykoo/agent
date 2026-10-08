@@ -182,11 +182,11 @@ class InterfaceFlowTests(unittest.TestCase):
             try:
                 self.assertTrue(catalog.setting("study_campaign"))
                 self.assertTrue(catalog.setting("auto_learn"))
-                self.assertEqual(catalog.setting("daily_limit"), 50)
+                self.assertEqual(catalog.setting("daily_limit"), 0)
             finally:
                 catalog.close()
         campaign.assert_called_once()
-        self.assertEqual(campaign.call_args.kwargs["daily_limit"], 50)
+        self.assertEqual(campaign.call_args.kwargs["daily_limit"], 0)
 
     def test_manual_practice_claims_the_existing_background_experiment(self):
         class PracticeRoot(Root):

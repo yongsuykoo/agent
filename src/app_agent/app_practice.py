@@ -1,5 +1,4 @@
 """Session-only permissions for specific user-selected app controls."""
-from datetime import datetime
 
 
 def control_identity(control):
@@ -30,12 +29,4 @@ def grants_action(grant, action, observation):
 
 
 def consume_practice_budget(catalog, limit=3):
-    day = datetime.now().astimezone().date().isoformat()
-    budget = catalog.setting("practice_budget", {"day": day, "used": 0})
-    if budget["day"] != day:
-        budget = {"day": day, "used": 0}
-    if budget["used"] >= limit:
-        return False
-    budget["used"] += 1
-    catalog.set_setting("practice_budget", budget)
-    return True
+    return catalog.consume_budget("practice_budget", limit) is not None

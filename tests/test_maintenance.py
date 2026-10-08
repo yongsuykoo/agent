@@ -41,6 +41,7 @@ class MaintenanceTests(unittest.TestCase):
             m.tick(s,'0.7.0',0);s.finish();m.tick(s,'0.7.0',0)
             self.assertEqual([r['operation'] for r in s.requests],['inventory','study'])
             self.assertEqual(s.requests[-1]['parameters']['daily_limit'],5)
+            self.assertEqual(s.requests[-1]['parameters']['max_apps'],3)
 
     def test_failed_test_is_retained_across_restart_and_new_version_can_retest(self):
         with tempfile.TemporaryDirectory() as directory, patch('app_agent.maintenance.time.monotonic',return_value=100):

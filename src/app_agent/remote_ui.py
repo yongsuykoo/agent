@@ -33,7 +33,7 @@ def launch_connection(data_dir, controller_key, named_hostname=None):
     controller_fingerprint = fingerprint(public)
     executable = tunnel_executable()
     root = tk.Tk()
-    root.title("App Agent connection — 0.7.1")
+    root.title("App Agent connection — 0.7.2")
     root.geometry("920x820")
     frame = ttk.Frame(root, padding=16)
     frame.pack(fill="both", expand=True)
@@ -47,7 +47,14 @@ def launch_connection(data_dir, controller_key, named_hostname=None):
     ttk.Checkbutton(frame, text="Allow AI self-tests and documentation research (provider usage charges)", variable=allow_cloud).pack(anchor="w")
     ttk.Checkbutton(frame, text="Enable cloud app tasks — I will grant controls in disposable windows locally", variable=allow_tasks).pack(anchor="w")
     automatic = tk.BooleanVar(value=True)
-    ttk.Checkbutton(frame, text="Automatic maintenance: signed worker updates, idle tests and up to 5 app studies/day", variable=automatic).pack(anchor="w")
+    ttk.Checkbutton(frame, text="Automatic maintenance: signed worker updates, idle tests and parallel app study", variable=automatic).pack(anchor="w")
+    from .catalog import Catalog
+    configuration = Catalog(data_dir)
+    try:
+        unlimited = tk.BooleanVar(value=configuration.setting('daily_limit', 0) == 0)
+    finally:
+        configuration.close()
+    ttk.Checkbutton(frame, text="No daily AI study/design cap — provider charges, quotas and rate limits still apply", variable=unlimited).pack(anchor="w")
     ttk.Label(frame, text="Automatic mode keeps this connection for up to 8 hours. Tests start after 60 seconds without input; avoid using the desktop during a test. AI tests/research incur provider charges.", wraplength=860).pack(anchor="w")
     ttk.Label(frame, text="OpenAI API key — optional; stays on this Windows computer for this session").pack(anchor="w", pady=(10, 0))
     key = tk.StringVar()
@@ -101,6 +108,8 @@ def launch_connection(data_dir, controller_key, named_hostname=None):
         state["disconnecting"] = True
         diagnostics.connections.clear()
         grants.clear()
+        if state.get('maintenance'):
+            state['maintenance'].close()
         for pending in pending_permissions:
             pending["event"].set()
         if state["session"]:
@@ -141,8 +150,14 @@ def launch_connection(data_dir, controller_key, named_hostname=None):
             if allow_tasks.get() and not allow_cloud.get():
                 raise RuntimeError("App tasks need the AI jobs option enabled.")
             duration = 8 * 3600 if automatic.get() else 2 * 3600
-            if not messagebox.askokcancel("Start Windows connection", f"Authorize this pinned cloud controller and the enabled local automatic cycle for up to {duration // 3600} hours? Automatic mode checks controller-signed worker updates, runs tests when idle, and studies up to five apps/day. Existing app-control grants are still required. Results stay local or encrypted to the controller. You can STOP at any time."):
+            usage = 'no daily app-imposed study/design cap' if unlimited.get() else 'five study/design attempts per day'
+            if not messagebox.askokcancel("Start Windows connection", f"Authorize this pinned cloud controller and the enabled local automatic cycle for up to {duration // 3600} hours? Automatic mode checks signed updates, tests when idle, and studies apps in parallel with {usage}. AI usage is billed by your provider. Existing app-control grants are required. You can STOP at any time."):
                 return
+            configuration = Catalog(data_dir)
+            try:
+                configuration.set_setting('daily_limit', 0 if unlimited.get() else 5)
+            finally:
+                configuration.close()
             def failed(error):
                 if state["session"]:
                     state["session"].stop()
@@ -221,7 +236,7 @@ def launch_connection(data_dir, controller_key, named_hostname=None):
 
     def copy_diagnostics():
         server, tunnel = state["server"], state["tunnel"]
-        report = diagnostics.report("0.7.1", controller_fingerprint,
+        report = diagnostics.report("0.7.2", controller_fingerprint,
                                     server.server_port if server else None,
                                     state["local_ok"] and not state["disconnecting"],
                                     tunnel is not None and tunnel.poll() is None)

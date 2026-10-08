@@ -212,10 +212,11 @@ class JobPolicyTests(unittest.TestCase):
             validate_job({"operation": "self_test"}, allow_cloud=True, allow_tests=False)
 
     def test_study_limits_and_parameter_types_are_enforced(self):
-        for parameter in ({"daily_limit": 51}, {"max_apps": 6}, {"max_plans": 4}, {"daily_limit": True}, {"max_apps": 0}):
+        for parameter in ({"daily_limit": -1}, {"daily_limit": 10001}, {"max_apps": 6}, {"max_plans": 4}, {"daily_limit": True}, {"max_apps": 0}):
             with self.assertRaises(ValueError):
                 validate_job({"operation": "study", "parameters": parameter}, True, True)
         self.assertEqual(validate_job({"operation": "study", "parameters": {"daily_limit": 50, "max_apps": 5, "max_plans": 3}}, True, True)["operation"], "study")
+        self.assertEqual(validate_job({"operation": "study", "parameters": {"daily_limit": 0}}, True, True)['parameters']['daily_limit'], 0)
 
     def test_stop_and_expiration_prevent_queued_execution(self):
         for expired in (False, True):

@@ -1,5 +1,7 @@
 # Evidence for the personal-agent goal
 
+Version 0.7.2 adds parallel research, optional uncapped daily usage, guarded local replay/cached plans, and Windows registry notifications. All 237 cloud checks pass; the repeated two-app simulation uses zero model calls after five initially. Native notifications, real installation adaptation and Windows latency remain unverified. See PERFORMANCE.md; this release does not complete the universal goal.
+
 The goal is independent discovery, study, practice, operation and troubleshooting of current and future Windows apps through chat/voice. It is open-ended: a percentage is not meaningful without a defined acceptance set. The earlier 20–30% estimate was an informal estimate, not a measurement. Adding code or passing simulated tests cannot establish 80% of universal app mastery.
 
 Use the following milestones to plan and evaluate a broad Windows release. A milestone needs live evidence for its stated acceptance target; implemented code alone is insufficient. Passing eight milestones would mean eight of this ten-item release acceptance set, not 80% understanding of every installed app.

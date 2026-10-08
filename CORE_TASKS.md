@@ -1,5 +1,7 @@
 # Personal task engine — 0.7.1
 
+Version 0.7.2 adds guarded local workflow replay, cached verified plans and deferred provider construction. These allow an eligible repeated task to finish without cloud calls; new or changed situations return to planning. See [PERFORMANCE.md](PERFORMANCE.md) for parallel study, uncapped usage, event-triggered inventory and acceptance evidence.
+
 The Windows app's default automatic mode accepts a submitted goal, chooses from the discovered inventory, and plans one to four ordered app steps. It finds the matching window or launches the discovered Start-menu identity. When several documents match, it attempts to identify a newly opened window instead of arbitrarily choosing an existing document.
 
 Run `windows\Start.cmd` after setup. Leave the window selector on **Automatic — choose app from command**. The visible **Run submitted chat/voice tasks autonomously** option authorizes actions for the submitted task, avoiding repeated action prompts. Uncheck it for supervised operation. Clicking **Push-to-talk** starts recording; finishing recording transcribes and submits the command in autonomous mode. STOP still cancels. The task, inventory names, observed control text and recorded command go to the configured provider; app images are included only with the image option checked.

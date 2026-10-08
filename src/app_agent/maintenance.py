@@ -26,6 +26,8 @@ class Maintenance:
         self.path = Path(directory) / 'automatic-progress.json'
         self.enabled, self.emit = enabled, emit
         self.pending = None
+        from .inventory_events import InventoryEvents
+        self.inventory_events = InventoryEvents()
         self.next_inventory, self.next_study = 0, 0
         try:
             self.state = json.loads(self.path.read_text(encoding='utf-8'))
@@ -44,6 +46,8 @@ class Maintenance:
         if not self.enabled or not session.active():
             return
         now = time.monotonic()
+        if self.inventory_events.poll():
+            self.next_inventory = 0
         if self.pending:
             identity, operation, test_key, started_version = self.pending
             result = session.get(identity)
@@ -75,12 +79,13 @@ class Maintenance:
         if now >= self.next_inventory:
             operation, parameters = 'inventory', {}
             self.next_inventory = now + 300
+            self.inventory_events.scanned()
         elif session.allow_tests and idle >= 60 and entry['attempts'] < 2 and not entry['failed']:
             operation, parameters = 'self_test', {'with_cloud': session.allow_cloud, 'with_voice': session.allow_cloud}
             entry['attempts'] += 1
             self.state['tests'][key] = entry
         elif session.allow_cloud and now >= self.next_study:
-            operation, parameters = 'study', {'daily_limit': 5, 'max_apps': 1, 'max_plans': 1}
+            operation, parameters = 'study', {'daily_limit': 5, 'max_apps': 3, 'max_plans': 1}
             self.next_study = now + 300
         else:
             return
@@ -92,3 +97,6 @@ class Maintenance:
         self.pending = (job['id'], operation, key, worker_version)
         self.save()
         self.emit('Automatic work started: ' + operation + '. Results are saved locally; STOP remains available.')
+
+    def close(self):
+        self.inventory_events.close()

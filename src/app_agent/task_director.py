@@ -2,12 +2,13 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 import json
+import hashlib
 from pathlib import Path
 import re
 import threading
 import time
 from .research import output_text, research_app
-from .learning import ensure_blueprint
+from .learning import ensure_blueprint, ResearchBusy
 from .runner import TaskRunner, exact_text_goal
 from .routing import window_matches, launch_app
 from .desktop import WindowsDesktop
@@ -43,7 +44,8 @@ def task_blueprint(catalog, app, cloud, emit, cancel, observation):
             raise RuntimeError('Task cancelled or app version changed; no action executed.') from error
         if re.search(r'HTTP (?:401|403|429)\b|needs AGENT_API_KEY', str(error)):
             raise
-        catalog.fail_research(app['id'], app['generation'], error)
+        if not isinstance(error, ResearchBusy):
+            catalog.fail_research(app['id'], app['generation'], error)
         emit('Documentation unavailable; using observed controls and verified workflow history. Documentation remains unverified.')
         return {'name': app['name'], 'version': app.get('version', ''), 'capabilities': [], 'sources': [],
                 'limitations': ['Documentation lookup failed: '+str(error)[:500],
@@ -129,7 +131,15 @@ class TaskDirector:
         records, verified = [], []
         outcome = 'error'
         try:
-            plan = task_plan(task,self.catalog.apps(),self.cloud)
+            cache_key = 'task-plan:'+hashlib.sha256(task.encode()).hexdigest()
+            cached = self.catalog.setting(cache_key, {})
+            apps = {app['id']: app for app in self.catalog.apps()}
+            if cached.get('steps') and cached.get('generations') and all(identity in apps and apps[identity]['generation'] == generation
+                    for identity, generation in cached['generations'].items()):
+                plan = cached['steps']
+                self.emit('Reusing the verified task plan for unchanged app versions.')
+            else:
+                plan = task_plan(task,list(apps.values()),self.cloud)
             for number, step in enumerate(plan,1):
                 if self.cancel.is_set():
                     outcome='cancelled';break
@@ -141,15 +151,21 @@ class TaskDirector:
                 desktop=self.resolve(app,self.cancel)
                 observed=desktop.observe()
                 identity=(observed.get('window_handle'),observed.get('process_id'))
-                blueprint=task_blueprint(self.catalog,app,self.cloud,self.emit,self.cancel,observed)
                 previous=self.catalog.workflows(app['id'],app['generation'])
+                blueprint=(app.get('blueprint') or {}) if any(w.get('recipe') and w['task'] == requested for w in previous) else task_blueprint(self.catalog,app,self.cloud,self.emit,self.cancel,observed)
                 result_id='CalculatorResults' if any(c.get('automation_id')=='CalculatorResults' for c in observed['controls']) else None
                 record=None
+                def permit(action, snapshot):
+                    if self.cancel.is_set() or self.catalog.get(app['id'])['generation'] != app['generation']:
+                        return False
+                    if (snapshot.get('window_handle'), snapshot.get('process_id')) != identity:
+                        return False
+                    return self.approve(action, snapshot)
                 for attempt in range(2):
                     latest=desktop.observe()
                     if identity!=(latest.get('window_handle'),latest.get('process_id')) or self.catalog.get(app['id'])['generation']!=app['generation']:
                         raise RuntimeError('App window/process/version changed; task discarded.')
-                    record=self.runner(desktop,self.cloud,self.approve,self.emit,self.directory,self.cancel).run(
+                    record=self.runner(desktop,self.cloud,permit,self.emit,self.directory,self.cancel).run(
                         requested,blueprint,max_steps=16,previous_workflows=previous,use_vision=use_vision,
                         required_result_text=expected,result_control_id=result_id)
                     records.append({'app_id':app['id'],'generation':app['generation'],'step':number,'attempt':attempt+1,'record':record})
@@ -178,6 +194,8 @@ class TaskDirector:
                     outcome=record['outcome'] if record else 'blocked';break
             else:
                 outcome='steps_verified'
+                self.catalog.set_setting(cache_key, {'steps': plan,
+                    'generations': {item['app_id']: item['generation'] for item in records}})
         except Exception as error:
             self.emit('Task blocked: '+str(error));records.append({'error':str(error)})
             if self.cancel.is_set():outcome='cancelled'

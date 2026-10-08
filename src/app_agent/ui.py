@@ -31,7 +31,7 @@ def launch_research(function):
 
 def launch(data_dir):
     root = tk.Tk()
-    root.title("Personal App Agent — 0.7.1")
+    root.title("Personal App Agent — 0.7.2")
     root.geometry("980x820")
     if not (os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")):
         key = simpledialog.askstring("Cloud AI setup", "OpenAI API key (kept in memory for this session).\nLeave blank to inspect windows without AI.", show="*", parent=root)
@@ -46,6 +46,8 @@ def launch(data_dir):
     task_permission = threading.Event()
     state = {"busy": False, "recording": False, "approval": None, "windows": [], "closing": False, "voice_timer": None, "last_scan": 0, "last_learning": 0, "learning_paused": False, "background_status": None, "research_busy": False, "practice_pending": False}
     recorder = Recorder()
+    from .inventory_events import InventoryEvents
+    inventory_events = InventoryEvents()
     state["voice_task_pending"] = False
     hotkey_stop = register_stop(lambda: (cancel.set(), events.put(("stop", None))), lambda text: events.put(("log", text)))
     frame = ttk.Frame(root, padding=12)
@@ -59,10 +61,13 @@ def launch(data_dir):
     toolbar.pack(fill="x")
     learning_bar = ttk.Frame(frame)
     learning_bar.pack(fill="x", pady=6)
+    learning_options = ttk.Frame(frame)
+    learning_options.pack(fill="x", pady=3)
     initial_catalog = Catalog(data_dir)
     auto_learn = tk.BooleanVar(value=initial_catalog.setting("auto_learn", True))
     auto_practice = tk.BooleanVar(value=initial_catalog.setting("auto_practice_calculator", False))
-    learning_limit = tk.IntVar(value=initial_catalog.setting("daily_limit", 3))
+    learning_limit = tk.IntVar(value=initial_catalog.setting("daily_limit", 0))
+    research_workers = tk.IntVar(value=initial_catalog.setting("research_workers", 3))
     initial_catalog.close()
     vision = tk.BooleanVar(value=False)
     practice_grants = {}
@@ -115,6 +120,7 @@ def launch(data_dir):
             return
         state["busy"] = True
         state["last_scan"] = time.monotonic()
+        inventory_events.scanned()
         status.set("Scanning installed desktop, Start-menu, and Store apps")
         def work():
             catalog = Catalog(data_dir)
@@ -131,12 +137,16 @@ def launch(data_dir):
     def learning_settings():
         try:
             limit = learning_limit.get()
-            if not 1 <= limit <= 50:
-                raise ValueError("Choose a daily limit from 1 to 50.")
+            if type(limit) is not int or limit < 0:
+                raise ValueError("Choose a nonnegative daily usage limit; 0 means uncapped.")
+            workers = research_workers.get()
+            if not 1 <= workers <= 4:
+                raise ValueError("Choose 1 to 4 parallel research workers.")
             catalog = Catalog(data_dir)
             try:
                 catalog.set_setting("auto_learn", auto_learn.get())
                 catalog.set_setting("daily_limit", limit)
+                catalog.set_setting("research_workers", workers)
             finally:
                 catalog.close()
             state["learning_paused"] = False
@@ -152,7 +162,6 @@ def launch(data_dir):
             return
         # This button explicitly enables the broad study campaign. Its visible
         # budget remains editable; existing app-control grants are preserved.
-        learning_limit.set(50)
         auto_learn.set(True)
         learning_settings()
         catalog = Catalog(data_dir)
@@ -162,7 +171,7 @@ def launch(data_dir):
         finally:
             catalog.close()
         state["last_learning"] = 0
-        append("Learning campaign enabled: up to 50 app studies and 50 experiment designs per day, using cloud API calls. STOP pauses it. Unattended actions use existing practice permissions only.")
+        append("Learning campaign enabled. Daily usage: " + ("uncapped; provider charges and quotas still apply" if learning_limit.get() == 0 else str(learning_limit.get()) + " studies/designs") + ". Independent app reading runs in parallel. STOP pauses it.")
 
     def practice_settings():
         if auto_practice.get() and not messagebox.askokcancel("Calculator practice permission", "Allow the agent to open Windows Calculator, clear its current calculation, and independently test arithmetic using only its number/operator buttons? It will not interact with other apps. Practice sends Calculator control text to OpenAI and uses API calls."):
@@ -356,7 +365,8 @@ def launch(data_dir):
                     apps = catalog.apps()
                 if mode == "run" and selected_handle is None:
                     from .task_director import TaskDirector, resolve_window
-                    TaskDirector(catalog, CloudResearcher(), approve, emit, data_dir, cancel,
+                    from .research import DeferredCloud
+                    TaskDirector(catalog, DeferredCloud(CloudResearcher), approve, emit, data_dir, cancel,
                         resolve=lambda selected, event: resolve_window(selected, event, desktop=WindowsDesktop, launch=launch_app),
                         runner=TaskRunner).run(task, use_vision=use_vision)
                     return
@@ -424,9 +434,11 @@ def launch(data_dir):
                 if app:
                     catalog = Catalog(data_dir)
                     try:
+                        previous = catalog.workflows(app["id"], app["generation"])
                         if mode == "run":
                             from .task_director import task_blueprint
-                            blueprint = task_blueprint(catalog, app, CloudResearcher(), emit, cancel, WindowsDesktop(selected_handle).observe())
+                            from .research import DeferredCloud
+                            blueprint = (app.get('blueprint') or {}) if any(w.get('recipe') and w['task'] == task for w in previous) else task_blueprint(catalog, app, DeferredCloud(CloudResearcher), emit, cancel, WindowsDesktop(selected_handle).observe())
                         else:
                             blueprint = ensure_blueprint(catalog, app, CloudResearcher(), emit, cancel)
                         previous = catalog.workflows(app["id"], app["generation"])
@@ -464,7 +476,8 @@ def launch(data_dir):
                         emit("Self-generated practice task: " + actual_task)
                     if cancel.is_set():
                         return
-                    record = TaskRunner(WindowsDesktop(selected_handle), CloudResearcher(), approve, emit, data_dir, cancel).run(actual_task, blueprint, previous_workflows=previous, use_vision=use_vision,
+                    from .research import DeferredCloud
+                    record = TaskRunner(WindowsDesktop(selected_handle), DeferredCloud(CloudResearcher), approve, emit, data_dir, cancel).run(actual_task, blueprint, previous_workflows=previous, use_vision=use_vision,
                         required_result_text=plan["expected_result"] if mode == "practice" else None)
                     if mode == "practice":
                         record["capability_name"] = plan["capability_name"]
@@ -534,6 +547,7 @@ def launch(data_dir):
 
     def close():
         stop()
+        inventory_events.close()
         if recorder.stream:
             recorder.stream.stop()
             recorder.stream.close()
@@ -609,9 +623,11 @@ def launch(data_dir):
     ttk.Button(toolbar, text="Self-test", command=start_self_test).pack(side="left", padx=5)
     ttk.Button(toolbar, text="Learn all apps", command=start_campaign).pack(side="left", padx=5)
     ttk.Checkbutton(learning_bar, text="Automatically study discovered/new apps", variable=auto_learn, command=learning_settings).pack(side="left")
-    ttk.Label(learning_bar, text="Daily app limit:").pack(side="left", padx=5)
-    ttk.Spinbox(learning_bar, from_=1, to=50, textvariable=learning_limit, width=4, command=learning_settings).pack(side="left")
-    ttk.Button(learning_bar, text="Apply / resume", command=learning_settings).pack(side="left", padx=5)
+    ttk.Label(learning_options, text="Daily studies/designs (0 = uncapped):").pack(side="left", padx=5)
+    ttk.Spinbox(learning_options, from_=0, to=10000, textvariable=learning_limit, width=5, command=learning_settings).pack(side="left")
+    ttk.Label(learning_options, text="Parallel readers:").pack(side="left", padx=5)
+    ttk.Spinbox(learning_options, from_=1, to=4, textvariable=research_workers, width=2, command=learning_settings).pack(side="left")
+    ttk.Button(learning_options, text="Apply / resume", command=learning_settings).pack(side="left", padx=5)
     ttk.Checkbutton(learning_bar, text="Auto-practice Calculator", variable=auto_practice, command=practice_settings).pack(side="left", padx=5)
     ttk.Checkbutton(frame, text="Include app-window images in AI requests for visual operation", variable=vision).pack(anchor="w")
     for label, mode in (("Run task", "run"), ("Research app", "research"), ("Practice app", "practice"), ("Inspect window", "observe"), ("Troubleshoot", "diagnose")):
@@ -637,8 +653,8 @@ def launch(data_dir):
         state["practice_pending"] = False
         try:
             daily_limit = learning_limit.get()
-            if not 1 <= daily_limit <= 50:
-                raise ValueError("Daily study limit must be between 1 and 50.")
+            if daily_limit < 0:
+                raise ValueError("Daily study limit must be nonnegative; 0 is uncapped.")
         except (ValueError, tk.TclError) as error:
             append(error)
             return
@@ -694,7 +710,8 @@ def launch(data_dir):
                             def approve_calculator(action, observation):
                                 return (observation.get("window_handle"), observation.get("process_id")) == identity and calculator_action(action, observation)
                             result = practice_one(catalog, known, CloudResearcher(), desktop, approve_calculator,
-                                lambda text: events.put(("log", text)), data_dir, cancel, daily_limit=daily_limit)
+                                lambda text: events.put(("log", text)), data_dir, cancel, daily_limit=daily_limit,
+                                practice_limit=0 if daily_limit == 0 else 3)
                             events.put(("log", "Calculator capability practice: " + result["status"]))
                 # Generic practice is scoped to explicit session grants;
                 # no arbitrary app is opened or granted controls by a model.
@@ -710,7 +727,8 @@ def launch(data_dir):
                     try:
                         result = practice_one(catalog, known, CloudResearcher(), WindowsDesktop(grant["window_handle"]),
                             lambda action, observation: grants_action(grant, action, observation),
-                            lambda text: events.put(("log", text)), data_dir, cancel, daily_limit=daily_limit)
+                            lambda text: events.put(("log", text)), data_dir, cancel, daily_limit=daily_limit,
+                            practice_limit=0 if daily_limit == 0 else 3)
                         if result["status"] not in ("no_ready_capability", "practice_daily_limit", "planning_daily_limit"):
                             events.put(("log", f"Practice in {known['name']}: {result['status']}"))
                     except Exception as error:
@@ -723,16 +741,18 @@ def launch(data_dir):
     def maintenance():
         if state["closing"]:
             return
+        changed = inventory_events.poll()
         if not state["busy"] and not state["recording"]:
-            if time.monotonic() - state["last_scan"] > 300:
+            if changed or time.monotonic() - state["last_scan"] > 300:
                 scan_inventory()
             elif state["practice_pending"] and not state["learning_paused"]:
                 background_practice()
             elif auto_learn.get() and not state["learning_paused"] and not state["research_busy"] and time.monotonic() - state["last_learning"] > 60 and (os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")):
                 try:
                     daily_limit = learning_limit.get()
-                    if not 1 <= daily_limit <= 50:
-                        raise ValueError("Daily study limit must be between 1 and 50.")
+                    if daily_limit < 0:
+                        raise ValueError("Daily study limit must be nonnegative; 0 is uncapped.")
+                    workers = research_workers.get()
                 except (ValueError, tk.TclError) as error:
                     append(error)
                     root.after(5000, maintenance)
@@ -745,9 +765,10 @@ def launch(data_dir):
                     catalog = None
                     try:
                         catalog = Catalog(data_dir)
-                        result = (study_campaign(catalog, CloudResearcher(), lambda text: events.put(("log", text)), daily_limit=daily_limit, cancel=research_cancel)
-                                  if catalog.setting("study_campaign", False) else
-                                  learn_next(catalog, CloudResearcher(), lambda text: events.put(("log", text)), daily_limit, research_cancel))
+                        result = study_campaign(catalog, CloudResearcher(), lambda text: events.put(("log", text)), daily_limit=daily_limit,
+                            max_apps=5 if catalog.setting("study_campaign", False) else workers,
+                            max_plans=3 if catalog.setting("study_campaign", False) else 0,
+                            research_workers=workers, cancel=research_cancel)
                         catalog_summary(catalog)
                         events.put(("study_complete", result))
                     except Exception as error:

@@ -54,7 +54,7 @@ def validate_job(value, allow_cloud, allow_tests, allow_tasks=False):
     elif operation == "study":
         if not allow_cloud:
             raise ValueError("Cloud research permission was not granted on Windows.")
-        limits = {"daily_limit": (1, 50), "max_apps": (1, 5), "max_plans": (0, 3)}
+        limits = {"daily_limit": (0, 10000), "max_apps": (1, 5), "max_plans": (0, 3)}
         if set(parameters) - set(limits):
             raise ValueError("Invalid study parameters.")
         for field, value in parameters.items():
@@ -115,7 +115,12 @@ def execute_job(job, data_dir, cancel, emit, task_permission=None):
         if operation == "study":
             from .campaign import study_campaign
             from .research import CloudResearcher
-            return study_campaign(catalog, CloudResearcher(), emit, cancel=cancel, **parameters)
+            effective = dict(parameters)
+            local_limit = catalog.setting('daily_limit')
+            if local_limit is not None:
+                effective['daily_limit'] = local_limit
+            effective['research_workers'] = catalog.setting('research_workers', 3)
+            return study_campaign(catalog, CloudResearcher(), emit, cancel=cancel, **effective)
         if operation == "task":
             if task_permission is None:
                 raise RuntimeError("No local app-control permission handler is available.")

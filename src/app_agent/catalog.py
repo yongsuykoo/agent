@@ -47,6 +47,36 @@ class Catalog:
         with self.db:
             self.db.execute("INSERT INTO settings VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, json.dumps(value)))
 
+    def consume_budget(self, key, limit):
+        """Reserve an attempt atomically. Zero means no daily application cap."""
+        if type(limit) is not int or limit < 0:
+            raise ValueError("Usage limit must be a nonnegative integer; zero means uncapped.")
+        day = datetime.now().astimezone().date().isoformat()
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            budget = self.setting(key, {"day": day, "used": 0})
+            if budget["day"] != day:
+                budget = {"day": day, "used": 0}
+            if limit and budget["used"] >= limit:
+                self.db.rollback()
+                return None
+            budget["used"] += 1
+            self.db.execute("INSERT INTO settings VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                            (key, json.dumps(budget)))
+            self.db.commit()
+            return budget
+        except BaseException:
+            self.db.rollback()
+            raise
+
+    def claim_research(self, identity, generation):
+        lease = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
+        with self.db:
+            cursor = self.db.execute("UPDATE apps SET status='researching',retry_at=? WHERE id=? AND generation=? AND present=1 AND "
+                "(status='queued' OR (status IN ('research_failed','researching') AND retry_at<=?))",
+                (lease, identity, generation, now()))
+        return cursor.rowcount == 1
+
     def sync(self, snapshot):
         changed = {"new": [], "updated": [], "removed": [], "warnings": snapshot.get("warnings", [])}
         seen = set()
@@ -88,7 +118,7 @@ class Catalog:
                 "error": row["error"], "blueprint": json.loads(row["blueprint"]) if row["blueprint"] else None}
 
     def next_research(self):
-        rows = self.db.execute("SELECT id FROM apps WHERE present=1 AND (status='queued' OR (status='research_failed' AND retry_at<=?)) ORDER BY attempts,updated,id", (now(),)).fetchall()
+        rows = self.db.execute("SELECT id FROM apps WHERE present=1 AND (status='queued' OR (status IN ('research_failed','researching') AND retry_at<=?)) ORDER BY attempts,updated,id", (now(),)).fetchall()
         known = {app["id"]: app for app in self.apps()}
         candidates = [known[row[0]] for row in rows if row[0] in known]
         # Learn user-facing launchable apps before driver/utility registrations.
@@ -123,7 +153,8 @@ class Catalog:
         return [{"task": row["task"], "actions": [{"action": entry["executed_action"],
                  "target": next((control for control in entry["observation"]["controls"] if control["id"] == entry["action"].get("target")), {})}
                  for entry in json.loads(row["record"])["history"] if entry.get("execution") == "executed"],
-                 "status": json.loads(row["record"])["outcome"] + "_once"} for row in rows]
+                 "status": json.loads(row["record"])["outcome"] + "_once",
+                 "recipe": json.loads(row["record"]).get("replay_recipe")} for row in rows]
 
     def save_interface(self, identity, generation, observation):
         with self.db:
@@ -242,7 +273,7 @@ class Catalog:
 
     def learning_overview(self):
         apps = self.apps()
-        summary = {"apps_detected": len(apps), "apps_documented": 0, "apps_queued": 0, "apps_research_deferred": 0,
+        summary = {"apps_detected": len(apps), "apps_documented": 0, "apps_queued": 0, "apps_research_deferred": 0, "apps_researching": 0,
                    "documented_capabilities": 0, "capabilities_tested_once": 0, "capabilities_tested_repeatedly": 0,
                    "capabilities_visually_assessed": 0, "capabilities_without_observed_test": 0, "experiments_ready": 0,
                    "experiments_deferred": 0, "initial_documentation_complete": False, "documentation_rounds": 0}
@@ -250,6 +281,7 @@ class Catalog:
             summary["apps_documented"] += bool(app["blueprint"])
             summary["apps_queued"] += app["status"] == "queued"
             summary["apps_research_deferred"] += app["status"] == "research_failed"
+            summary["apps_researching"] += app["status"] == "researching"
             if app["blueprint"]:
                 summary["documentation_rounds"] += self.setting(f"documentation:{app['id']}:{app['generation']}", {}).get("rounds", 1)
             coverage = self.coverage(app["id"], app["generation"])
