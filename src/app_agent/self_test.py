@@ -172,7 +172,7 @@ def learning_experiment(fixture, cloud, run_dir, cancel, emit):
             "permitted_actions": ["Replace document text using the existing editable control"],
             "required_task_form": "Replace the document text with exactly: <your own short test text>",
             "verification": "expected_result must be exactly your chosen document text; choose a documented text-entry operation",
-            "forbidden_actions": ["Save", "Open another document", "Invoke menus", "Change settings"]})
+            "forbidden_actions": ["Save", "Open another document", "Invoke menus", "Change settings"]}, cancel=cancel)
         if cancel.is_set():
             raise RuntimeError("Self-test stopped.")
         if exact_text_goal(plan["task"]) != plan["expected_result"]:

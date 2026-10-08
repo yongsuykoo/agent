@@ -1,4 +1,5 @@
 import tempfile
+import json
 import threading
 import unittest
 from unittest.mock import patch, Mock
@@ -89,3 +90,47 @@ class LearningTests(unittest.TestCase):
         cloud.request.return_value = {"output": [{"content": [{"type": "output_text", "text": '{"risk":"unsupported"}'}]}]}
         with self.assertRaises(RuntimeError):
             practice_task({"capabilities": []}, cloud)
+        self.assertEqual(cloud.request.call_count, 1)
+
+    def response(self, plan):
+        return {"output": [{"content": [{"type": "output_text", "text": json.dumps(plan)}]}]}
+
+    def test_mismatched_experiment_is_repaired_before_it_can_be_returned(self):
+        bad = {"task": "Replace the document text with exactly: First", "expected_result": "Different",
+               "capability_name": "Write", "risk": "disposable"}
+        good = {**bad, "task": "Replace the document text with exactly: New experiment", "expected_result": "New experiment"}
+        context = {"required_task_form": "Replace the document text with exactly: <your own short test text>"}
+        cloud = Mock()
+        cloud.request.side_effect = [self.response(bad), self.response(good)]
+        result = practice_task({"capabilities": [{"name": "Write"}]}, cloud, experiment_context=context)
+        self.assertEqual(result, good)
+        self.assertEqual(cloud.request.call_count, 2)
+        retry = cloud.request.call_args.kwargs
+        feedback = json.loads(retry["input"])
+        self.assertIn("matching its expected result", feedback["validation_error"])
+        self.assertEqual(feedback["previous_plan"], bad)
+        schema = retry["text"]["format"]
+        self.assertTrue(schema["strict"])
+        self.assertFalse(schema["schema"]["additionalProperties"])
+        self.assertEqual(schema["schema"]["properties"]["capability_name"]["enum"], ["Write", None])
+
+    def test_invalid_practice_stops_after_three_attempts_without_changing_the_goal(self):
+        bad = {"task": "Replace the document text with exactly: First", "expected_result": "Different",
+               "capability_name": "Write", "risk": "disposable"}
+        cloud = Mock()
+        cloud.request.return_value = self.response(bad)
+        with self.assertRaisesRegex(RuntimeError, "after three attempts"):
+            practice_task({"capabilities": [{"name": "Write"}]}, cloud,
+                          experiment_context={"required_task_form": "Replace the document text with exactly: <your own short test text>"})
+        self.assertEqual(cloud.request.call_count, 3)
+
+    def test_cancel_during_planning_prevents_retry_and_returning_a_plan(self):
+        cancel = threading.Event()
+        cloud = Mock()
+        def response(**kwargs):
+            cancel.set()
+            return self.response({"task": "Write", "expected_result": "Text", "capability_name": "Write", "risk": "disposable"})
+        cloud.request.side_effect = response
+        with self.assertRaisesRegex(RuntimeError, "cancelled"):
+            practice_task({"capabilities": [{"name": "Write"}]}, cloud, cancel=cancel)
+        self.assertEqual(cloud.request.call_count, 1)

@@ -6,6 +6,36 @@ from test_runner import FakeDesktop, FakeCloud, observation
 
 
 class RecoveryTests(unittest.TestCase):
+    def test_recovery_prompt_receives_actual_result_instead_of_the_previous_claim(self):
+        class Desktop(FakeDesktop):
+            def observe(self):
+                return {"window": "Calculator", "controls": [
+                    {"id": 1, "name": "Clear", "type": "Button", "automation_id": "clearButton", "enabled": True, "visible": True, "actions": ["invoke"]},
+                    {"id": 2, "name": "Display is " + ("45" if self.actions else "19"), "type": "Text", "automation_id": "CalculatorResults", "enabled": True, "visible": True}]}
+        class Cloud(FakeCloud):
+            requests = []
+            def request(self, **payload):
+                self.requests.append(json.loads(payload["input"]))
+                return super().request(**payload)
+        cloud = Cloud([{"kind": "finish", "reason": "Claim 45", "expected_text": "45"},
+                       {"kind": "invoke", "target": 1, "reason": "Recover"},
+                       {"kind": "finish", "reason": "Verified", "expected_text": "45"}])
+        result = self.execute(Desktop(), cloud, required_result_text="45", result_control_id="CalculatorResults")
+        self.assertEqual(result["outcome"], "result_observed")
+        retry = cloud.requests[1]
+        self.assertEqual(retry["current_observed_result"][0]["name"], "Display is 19")
+        self.assertIn("Display is 19", retry["history"][0]["error"])
+        final = cloud.requests[2]
+        self.assertEqual(final["history"][-1]["observed_result"][0]["name"], "Display is 45")
+
+    def test_compact_feedback_excludes_password_and_hidden_values(self):
+        from app_agent.runner import observed_results
+        current = {"controls": [
+            {"type": "Edit", "automation_id": "secret", "name": "Password", "value": "private", "visible": True, "password": True},
+            {"type": "Text", "automation_id": "hidden", "name": "Hidden", "value": "private", "visible": False},
+            {"type": "Text", "automation_id": "result", "name": "Display is 10", "value": "", "visible": True}]}
+        self.assertEqual(observed_results(current), [{"automation_id": "result", "name": "Display is 10", "value": ""}])
+
     def test_stable_identity_corrects_seven_vs_eight_numeric_index(self):
         controls = [{"id": 43, "name": "Seven", "type": "Button", "automation_id": "num7Button", "enabled": True, "visible": True, "actions": ["invoke"]},
                     {"id": 44, "name": "Eight", "type": "Button", "automation_id": "num8Button", "enabled": True, "visible": True, "actions": ["invoke"]}]

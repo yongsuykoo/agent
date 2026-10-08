@@ -34,13 +34,15 @@ def prepare_next_experiment(catalog, app, cloud, emit, daily_limit=50, cancel=No
         return {"status": "planning_daily_limit"}
     emit(f"Designing an experiment for {app['name']}: {capability}")
     try:
-        plan = practice_task(app["blueprint"], cloud, catalog.workflows(app["id"], app["generation"]), capability_name=capability)
+        plan = practice_task(app["blueprint"], cloud, catalog.workflows(app["id"], app["generation"]), capability_name=capability, cancel=cancel)
         if cancel is not None and cancel.is_set():
             return {"status": "cancelled"}
         if not catalog.save_practice_plan(app["id"], app["generation"], plan):
             return {"status": "app_changed"}
         return {"status": "experiment_ready", "app": app["name"], "capability": capability}
     except Exception as error:
+        if cancel is not None and cancel.is_set():
+            return {"status": "cancelled"}
         catalog.defer_practice_plan(app["id"], app["generation"], capability, error)
         emit(f"Experiment deferred for {app['name']} / {capability}: {error}")
         return {"status": "cloud_blocked" if cloud_blocked(error) else "experiment_deferred", "error": str(error)}
