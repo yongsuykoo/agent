@@ -39,7 +39,7 @@ def run_checks(checks, report_path, cancel, emit):
         package_version = "unknown"
     report = {"started_at": datetime.now(timezone.utc).isoformat(), "checks": [],
               "agent_version": package_version,
-              "report_path": str(report_path), "scope": "Windows inventory, Calculator, disposable Notepad; not universal app certification"}
+              "report_path": str(report_path), "scope": "Named automatic checks only; optional Office checks use fresh test files; not universal app certification"}
     for name, check in checks:
         if cancel.is_set():
             item = {"name": name, "status": "cancelled"}
@@ -230,7 +230,7 @@ def learning_experiment(fixture, cloud, run_dir, cancel, emit):
         catalog.close()
 
 
-def self_test(data_dir, cloud=None, emit=print, cancel=None, with_voice=False):
+def self_test(data_dir, cloud=None, emit=print, cancel=None, with_voice=False, with_office=False):
     if sys.platform != "win32":
         raise RuntimeError("Live self-test needs an interactive Windows computer; cloud Linux cannot control your PC.")
     cancel = cancel or threading.Event()
@@ -331,6 +331,11 @@ def self_test(data_dir, cloud=None, emit=print, cancel=None, with_voice=False):
               ("AI documentation-to-practice learning", lambda: learning_experiment(fixture, cloud, run_dir, cancel, emit))]
     if with_voice:
         checks.append(("AI synthetic speech-to-editor command", voice_command))
+    if with_office:
+        from .office_checks import office_smoke
+        checks.extend(("Native "+family+" file creation and content verification",
+                       lambda family=family:office_smoke(data_dir,run_dir,family,cancel)) for family in ('excel','word'))
+        emit("Optional Office tests create new Excel/Word files and leave those test documents open. Existing user documents are not edited. No provider calls for Office checks.")
     emit("Self-test uses a new disposable Notepad file and clears Calculator. Please leave the desktop untouched until it finishes. STOP cancels remaining checks.")
     report = run_checks(checks, run_dir / "report.json", cancel, emit)
     emit("Self-test complete. The disposable Notepad file and session evidence remain in " + str(run_dir))

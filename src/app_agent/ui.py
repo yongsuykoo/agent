@@ -33,7 +33,7 @@ def launch_research(function):
 
 def launch(data_dir):
     root = tk.Tk()
-    root.title("Personal App Agent — 0.11.0")
+    root.title("Personal App Agent — 0.12.0")
     root.geometry("980x820")
     if not (os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")):
         key = simpledialog.askstring("Cloud AI setup", "OpenAI API key (kept in memory for this session).\nLeave blank to inspect windows without AI.", show="*", parent=root)

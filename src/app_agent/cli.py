@@ -23,6 +23,7 @@ def main():
     commands.add_parser("windows-smoke", help="Open Calculator and test three calculations; clears its current calculation")
     automatic = commands.add_parser("self-test", help="Automatically test Windows inventory, Calculator and disposable Notepad; save a report")
     automatic.add_argument("--with-cloud", action="store_true", help="Also run AI tasks; prompts securely for a missing API key")
+    automatic.add_argument("--with-office", action="store_true", help="Also create and verify fresh Excel/Word test files when installed; no cloud calls")
     commands.add_parser("scan", help="Discover apps and persist installation/version changes")
     commands.add_parser("machine-report", help="Show local Windows, app-interface and installation evidence")
     commands.add_parser("knowledge-map", help="Show the versioned system/app evidence graph")
@@ -79,7 +80,7 @@ def main():
                         key = getpass("OpenAI API key (hidden; blank skips cloud checks): ").strip()
                     if key:
                         cloud = CloudResearcher(key=key)
-                report = self_test(args.data_dir, cloud=cloud)
+                report = self_test(args.data_dir, cloud=cloud,with_office=args.with_office)
                 print(json.dumps(report, indent=2))
                 if report["status"] in ("failed", "cancelled"):
                     parser.exit(1, "Self-test did not pass; see the saved report.\n")

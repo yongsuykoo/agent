@@ -132,10 +132,15 @@ class TaskDirector:
         self.checkpoint,self.selected_app = checkpoint,selected_app
 
     def run(self, task, use_vision=False):
-        from .logo_design import logo_request
-        if logo_request(task):
+        from .tool_broker import choose_tool
+        route=choose_tool(task,self.catalog.apps(),self.selected_app)
+        if route['kind']=='photoshop':
             from .native_tasks import run_logo
             return run_logo(self, task)
+        if route['kind']=='office':
+            from .office_tasks import run_office
+            result=run_office(self,task,route)
+            if result is not None:return result
         records = self.checkpoint.records() if self.checkpoint else []
         verified = self.checkpoint.jobs.get(self.checkpoint.id)['verified'] if self.checkpoint else []
         outcome = 'error'
