@@ -261,14 +261,27 @@ def validate_extraction(result, documents):
     return {"capabilities": capabilities, "limitations": limitations}
 
 
-def research_app(name, version, researcher, urls=None, fetcher=fetch_document, focus=None, exclude_urls=None, known_capabilities=None):
+def research_app(name, version, researcher, urls=None, fetcher=fetch_document, focus=None, exclude_urls=None, known_capabilities=None, local_documents=None):
     if not name.strip():
         raise ValueError("Application name must not be empty.")
+    local_failure = None
+    if local_documents:
+        # Installation manuals can answer immediately without web discovery.
+        # Provider authentication/rate errors propagate; only unsuitable manual
+        # extraction falls back to additional online documentation.
+        try:
+            extracted = researcher.extract(name, version, local_documents, known_capabilities=known_capabilities) if known_capabilities else researcher.extract(name, version, local_documents)
+            return {"name": name.strip(), "version": version,
+                    "sources": [{key: value for key, value in doc.items() if key != "text"} for doc in local_documents],
+                    **extracted, "retrieval_failures": [], "evidence_origin": "installed_manuals",
+                    "updated_at": datetime.now(timezone.utc).isoformat()}
+        except ValueError as error:
+            local_failure = 'Installed manuals did not establish documented operations: ' + str(error)[:300]
     sources = urls or (researcher.find_sources(name, version, focus=focus, exclude_urls=exclude_urls)
                        if focus or exclude_urls else researcher.find_sources(name, version))
     if len(sources) > 5:
         raise ValueError("Research supports at most five source pages per run.")
-    documents, failures = [], []
+    documents, failures = [], [local_failure] if local_failure else []
     def retrieve(url):
         try:
             with DOCUMENT_SLOTS:

@@ -3,6 +3,7 @@ import json
 import os
 import sqlite3
 from pathlib import Path
+from .machine import scan_machine, machine_report
 from .discovery import installed_apps, scan_apps
 from .catalog import Catalog
 from .learning import learn_next
@@ -23,11 +24,12 @@ def main():
     automatic = commands.add_parser("self-test", help="Automatically test Windows inventory, Calculator and disposable Notepad; save a report")
     automatic.add_argument("--with-cloud", action="store_true", help="Also run AI tasks; prompts securely for a missing API key")
     commands.add_parser("scan", help="Discover apps and persist installation/version changes")
+    commands.add_parser("machine-report", help="Show local Windows, app-interface and installation evidence")
     commands.add_parser("apps", help="List discovered apps and documentation status")
     study = commands.add_parser("study-next", help="Research one queued app within the daily background budget")
-    study.add_argument("--daily-limit", type=int, default=3, choices=range(1, 51))
+    study.add_argument("--daily-limit", type=int, default=0, choices=range(0, 10001))
     campaign = commands.add_parser("study-campaign", help="Study queued apps and design capability experiments; no desktop mutations")
-    campaign.add_argument("--daily-limit", type=int, default=50, choices=range(1, 51))
+    campaign.add_argument("--daily-limit", type=int, default=0, choices=range(0, 10001))
     campaign.add_argument("--max-apps", type=int, default=5, choices=range(1, 51))
     campaign.add_argument("--max-plans", type=int, default=3, choices=range(0, 51))
     commands.add_parser("learning-report", help="Show current evidence counts and campaign progress")
@@ -77,19 +79,21 @@ def main():
         elif args.command in ("doctor", "windows-smoke"):
             from .windows_checks import doctor, calculator_smoke
             result = doctor() if args.command == "doctor" else calculator_smoke()
-        elif args.command in ("scan", "apps", "study-next", "study-campaign", "learning-report"):
+        elif args.command in ("scan", "apps", "study-next", "study-campaign", "learning-report", "machine-report"):
             catalog = Catalog(args.data_dir)
             try:
                 if args.command == "scan":
-                    result = catalog.sync(scan_apps())
+                    result = scan_machine(catalog, scanner=scan_apps)
                 elif args.command == "apps":
                     result = [{key: value for key, value in app.items() if key not in ("blueprint", "location")} for app in catalog.apps()]
+                elif args.command == "machine-report":
+                    result = machine_report(catalog)
                 elif args.command == "learning-report":
-                    result = {"overview": catalog.learning_overview(), "campaign": catalog.setting("campaign_state", {})}
+                    result = {"overview": catalog.learning_overview(), "machine": machine_report(catalog), "campaign": catalog.setting("campaign_state", {})}
                 elif args.command == "study-campaign":
                     from .campaign import study_campaign
                     if os.name == "nt":
-                        catalog.sync(scan_apps())
+                        scan_machine(catalog, scanner=scan_apps)
                     result = study_campaign(catalog, CloudResearcher(), lambda text: print(text), args.daily_limit, args.max_apps, args.max_plans)
                 else:
                     result = learn_next(catalog, CloudResearcher(), lambda text: print(text), args.daily_limit)

@@ -70,6 +70,7 @@ def execute_job(job, data_dir, cancel, emit, task_permission=None):
     # HTTP threads. There is no remote shell, arbitrary script or file path.
     from .catalog import Catalog
     from .discovery import scan_apps
+    from .machine import scan_machine, machine_report
     from .desktop import WindowsDesktop, window_process_id
     operation, parameters = job["operation"], job["parameters"]
     if cancel.is_set():
@@ -97,7 +98,7 @@ def execute_job(job, data_dir, cancel, emit, task_permission=None):
     catalog = Catalog(data_dir)
     try:
         if operation == "inventory":
-            changes = catalog.sync(scan_apps())
+            changes = scan_machine(catalog, cancel=cancel, scanner=scan_apps, desktop=WindowsDesktop)
             return {"changes": changes, "apps": [{key: value for key, value in app.items() if key not in ("blueprint", "location")}
                                                  for app in catalog.apps()]}
         if operation == "learning_report":
@@ -108,7 +109,7 @@ def execute_job(job, data_dir, cancel, emit, task_permission=None):
                     if saved and saved["status"] == "ready" and saved["body"] and len(plans) < 100:
                         plans.append({"app_id": app["id"], "generation": app["generation"], "app": app["name"],
                                       "plan": saved["body"], "status": "ready_unexecuted"})
-            return {"overview": catalog.learning_overview(), "campaign": catalog.setting("campaign_state", {}),
+            return {"overview": catalog.learning_overview(), "machine": machine_report(catalog), "campaign": catalog.setting("campaign_state", {}),
                     "ready_experiments": plans,
                     "automatic_progress": json.loads((Path(data_dir) / 'automatic-progress.json').read_text(encoding='utf-8'))
                     if (Path(data_dir) / 'automatic-progress.json').is_file() else None}

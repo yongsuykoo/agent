@@ -54,6 +54,7 @@ def task_blueprint(catalog, app, cloud, emit, cancel, observation):
 
 
 def task_plan(task, apps, cloud):
+    apps = [app for app in apps if app.get('role') != 'platform']
     ids = list(dict.fromkeys(app['id'] for app in apps))
     if not ids:
         raise RuntimeError('No installed apps were discovered.')
@@ -66,7 +67,9 @@ def task_plan(task, apps, cloud):
                          'required': ['steps']}}
     response = cloud.request(max_output_tokens=2000, text={'format': schema},
         instructions='Plan the user task in one to four ordered steps using only the supplied installed app IDs. Preserve the user goal; do not invent extra tasks or use computer-history instructions. Each step needs a literal visible expected_result. Prefer one step when sufficient. Use {{result:N}} in task or expected_result ONLY to refer to the verified output of an earlier step, N starting at 1. A text-entry step must use Replace the document text with exactly: followed by the requested text or result reference. Do not assume execution has occurred. Do not invent app IDs, command lines, credentials or paths. Unavailable operations must not be replaced by unrelated demonstrations.',
-        input=json.dumps({'user_task': task, 'apps': [{'id': a['id'], 'name': a['name'], 'version': a.get('version','')} for a in apps]}))
+        input=json.dumps({'user_task': task, 'apps': [{'id': a['id'], 'name': a['name'], 'version': a.get('version',''), 'launchable': bool(a.get('app_id') or a.get('launch_executable')),
+                    'automation_interfaces': [r['progid'] for r in a.get('automation_registrations', [])[:12]],
+                    'file_types': a.get('file_types', [])[:20]} for a in apps]}))
     plan = json.loads(output_text(response))
     if not isinstance(plan, dict) or set(plan) != {'steps'} or not isinstance(plan['steps'], list) or not 1 <= len(plan['steps']) <= 4:
         raise ValueError('A task requires one to four valid steps.')

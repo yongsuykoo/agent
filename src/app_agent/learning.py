@@ -24,7 +24,11 @@ def ensure_blueprint(catalog, app, cloud, emit, cancel=None, claimed=False):
         raise ResearchBusy("Documentation study already running or deferred; observed task controls remain available.")
     emit(f"Studying {app['name']} {app.get('version', '')}: finding documentation and operational procedures.")
     # Search independently: do not assume a registry HelpLink is current/trusted.
-    blueprint = research_app(app["name"], app.get("version", ""), cloud)
+    from .machine import installed_research_options
+    options = installed_research_options(catalog, app)
+    blueprint = research_app(app["name"], app.get("version", ""), cloud, **options)
+    if options:
+        blueprint['installed_evidence'] = options['focus']['observed_installation']
     if cancel is not None and cancel.is_set():
         raise RuntimeError("Research cancelled; no new blueprint saved.")
     if not catalog.save_blueprint(app["id"], app["generation"], blueprint):

@@ -6,11 +6,14 @@ from . import learning
 
 def study_batch(catalog, cloud, emit, limit, max_apps, workers, cancel):
     results, started, status = [], 0, 'progress'
-    def read(app):
+    def read(app, options):
         if cancel is not None and cancel.is_set():
             return None
         emit(f"Parallel study: {app['name']}")
-        return learning.research_app(app['name'], app.get('version', ''), cloud)
+        blueprint = learning.research_app(app['name'], app.get('version', ''), cloud, **options)
+        if options:
+            blueprint['installed_evidence'] = options['focus']['observed_installation']
+        return blueprint
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix='app-study') as pool:
         while started < max_apps:
             pending = {}
@@ -25,7 +28,9 @@ def study_batch(catalog, cloud, emit, limit, max_apps, workers, cancel):
                     status = 'daily_limit';break
                 if not catalog.claim_research(app['id'], app['generation']):
                     continue
-                pending[pool.submit(read, app)] = app
+                from .machine import installed_research_options
+                options = installed_research_options(catalog, app)
+                pending[pool.submit(read, app, options)] = app
                 started += 1
             if not pending:
                 break

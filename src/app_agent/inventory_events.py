@@ -28,6 +28,10 @@ class InventoryEvents:
             uninstall = r'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
             targets = [(root, uninstall, view) for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER)
                        for view in (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY)]
+            targets += [(root, r'SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths', view)
+                        for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER)
+                        for view in (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY)]
+            targets += [(root, r'SOFTWARE\Classes', 0) for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER)]
             targets.append((winreg.HKEY_CURRENT_USER,
                 r'Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages', 0))
             for root, path, view in targets:

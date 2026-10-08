@@ -4,6 +4,7 @@ import json
 import re
 import subprocess
 import sys
+from .local_inspection import executable_path
 
 
 def normalized_name(name):
@@ -28,6 +29,7 @@ def merge_inventory(registry, starts, packages):
             "publisher": package.get("publisher") or registered.get("publisher", ""),
             "location": package.get("location") or registered.get("location", ""),
             "help_url": registered.get("help_url", ""), "source": "start_menu",
+            "executables": list(dict.fromkeys([*registered.get("executables", []), *item.get("executables", [])])),
             "aliases": sorted({name, registered.get("name", name), package.get("name", name)})}
         used_names.add(normalized_name(name))
         used_families.add(family)
@@ -71,7 +73,8 @@ def scan_apps():
                             name = value("DisplayName")
                             if name and value("SystemComponent") != "1":
                                 registry.append({"name": name, "version": value("DisplayVersion"),
-                                    "publisher": value("Publisher"), "location": value("InstallLocation"), "help_url": value("HelpLink")})
+                                    "publisher": value("Publisher"), "location": value("InstallLocation"), "help_url": value("HelpLink"),
+                                    "executables": [exe] if (exe := executable_path(re.sub(r",\s*-?\d+$", "", value("DisplayIcon")))) else []})
                     except OSError:
                         complete.discard("registry")
                         warnings.append("An app registry entry changed or was inaccessible.")
@@ -79,8 +82,23 @@ def scan_apps():
     script = r"""
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $warnings = @(); $complete = @(); $starts = @(); $packages = @()
-try { $starts = @(Get-StartApps -ErrorAction Stop | Select-Object Name,AppID); $complete += 'start_menu' }
-catch { $warnings += 'Start menu discovery unavailable.' }
+try {
+  $starts = @(Get-StartApps -ErrorAction Stop | Select-Object Name,AppID)
+  $links = @{}; $shell = New-Object -ComObject WScript.Shell
+  foreach ($folder in @([Environment]::GetFolderPath('Programs'), [Environment]::GetFolderPath('CommonPrograms'))) {
+    if (-not $folder -or -not (Test-Path $folder)) { continue }
+    foreach ($file in (Get-ChildItem -LiteralPath $folder -Filter '*.lnk' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1024)) {
+      $target = $shell.CreateShortcut($file.FullName).TargetPath
+      if ($target -and $target.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase)) {
+        if (-not $links.ContainsKey($file.BaseName)) { $links[$file.BaseName] = @() }
+        $links[$file.BaseName] += $target
+      }
+    }
+  }
+  $starts = @($starts | ForEach-Object { @{Name=$_.Name; AppID=$_.AppID; executables=@($links[$_.Name] | Select-Object -Unique)} })
+  $complete += 'start_menu'
+}
+catch { $warnings += 'Start shortcut inspection incomplete.'; if ($starts.Count -gt 0) { $complete += 'start_menu' } }
 try { $packages = @(Get-AppxPackage -ErrorAction Stop | Where-Object { -not $_.IsFramework -and -not $_.IsResourcePackage } | ForEach-Object { @{ name=$_.Name; family=$_.PackageFamilyName; version=$_.Version.ToString(); publisher=$_.Publisher; location=$_.InstallLocation } }); $complete += 'store' }
 catch { $warnings += 'Store discovery unavailable.' }
 @{ starts=$starts; packages=$packages; warnings=$warnings; complete=$complete } | ConvertTo-Json -Depth 5 -Compress

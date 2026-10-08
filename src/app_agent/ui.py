@@ -15,6 +15,7 @@ from .voice import Recorder, transcribe
 from .hotkey import register_stop
 from .automation_worker import AutomationWorker
 from .catalog import Catalog
+from .machine import scan_machine, machine_report
 from .discovery import scan_apps
 from .learning import ensure_blueprint, learn_next, practice_task
 from .campaign import study_campaign, practice_one
@@ -31,7 +32,7 @@ def launch_research(function):
 
 def launch(data_dir):
     root = tk.Tk()
-    root.title("Personal App Agent — 0.7.2")
+    root.title("Personal App Agent — 0.8.0")
     root.geometry("980x820")
     if not (os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")):
         key = simpledialog.askstring("Cloud AI setup", "OpenAI API key (kept in memory for this session).\nLeave blank to inspect windows without AI.", show="*", parent=root)
@@ -113,7 +114,7 @@ def launch(data_dir):
         events.put(("inventory", f"{len(apps)} apps detected; {progress['apps_documented']} documented; "
                     f"{progress['capabilities_tested_once']}/{progress['documented_capabilities']} capabilities have observed tests; "
                     f"{progress['experiments_ready']} experiments ready. Monitoring every 5 minutes while open. "
-                    f"Study budget: {catalog.setting('daily_limit', 3)} apps/day."))
+                    f"Daily study/design budget: {catalog.setting('daily_limit', 0)} (0 = uncapped). Local machine inspection has no daily cap."))
 
     def scan_inventory():
         if state["busy"] or state["recording"]:
@@ -121,11 +122,11 @@ def launch(data_dir):
         state["busy"] = True
         state["last_scan"] = time.monotonic()
         inventory_events.scanned()
-        status.set("Scanning installed desktop, Start-menu, and Store apps")
+        status.set("Reading Windows and installed application evidence")
         def work():
             catalog = Catalog(data_dir)
             try:
-                changes = catalog.sync(scan_apps())
+                changes = scan_machine(catalog, scanner=scan_apps, desktop=WindowsDesktop)
                 events.put(("log", f"Inventory: {len(changes['new'])} new, {len(changes['updated'])} updated, {len(changes['removed'])} removed. " + "; ".join(changes['warnings'])))
                 if changes["new"]:
                     events.put(("log", "New apps queued for study: " + ", ".join(changes["new"][:15])))
@@ -189,6 +190,32 @@ def launch(data_dir):
             task_permission.set()
             resolve_approval(True)
 
+    def show_machine():
+        catalog = Catalog(data_dir)
+        try:
+            report = machine_report(catalog)
+        finally:
+            catalog.close()
+        dialog = tk.Toplevel(root)
+        dialog.title("Machine onboarding evidence")
+        dialog.geometry("880x600")
+        ttk.Label(dialog, text="Local inspection, documentation and observed operations are tracked separately.").pack(anchor="w", padx=10, pady=8)
+        summary = report['summary']; machine = report['machine']; os_facts = machine.get('os', {})
+        ttk.Label(dialog, text=f"Windows {os_facts.get('version', '')} build {os_facts.get('build', 'not yet inspected')} · "
+                  f"{summary['entries']} entries · {summary['locally_inspected']} locally inspected · "
+                  f"{summary['documented']} documented · {summary['with_verified_workflows']} with verified workflows",
+                  wraplength=840).pack(anchor="w", padx=10, pady=8)
+        tree = ttk.Treeview(dialog, columns=('app', 'inspection', 'knowledge', 'verified'), show='headings')
+        for key, label in [('app', 'Software'), ('inspection', 'Local inspection'), ('knowledge', 'Study'), ('verified', 'Verified workflows')]:
+            tree.heading(key, text=label)
+            tree.column(key, width=220 if key == 'app' else 160)
+        for entry in report['apps']:
+            inspection = 'Observed' if entry['inspection_complete'] else 'Partial' if entry['inspection'] != 'not_inspected' else 'Pending'
+            tree.insert('', 'end', values=(entry['name'], inspection, entry['knowledge'].replace('_', ' '), entry['verified_workflows']))
+        tree.pack(fill='both', expand=True, padx=10, pady=10)
+        ttk.Label(dialog, text="New software is queued automatically. Inspected files and documentation do not establish that every operation works. "
+                  "Detailed evidence is saved in machine-report.json in your AppAgent data folder.", wraplength=840).pack(anchor='w', padx=10, pady=8)
+
     def show_apps():
         catalog = Catalog(data_dir)
         try:
@@ -218,11 +245,12 @@ def launch(data_dir):
             catalog = Catalog(data_dir)
             try:
                 evidence = catalog.workflows(app["id"], app["generation"])
+                local_evidence = catalog.local_evidence(app["id"], app["generation"])
                 coverage = catalog.coverage(app["id"], app["generation"])
                 experiments = [catalog.practice_plan(app["id"], app["generation"], cap["name"]) for cap in coverage]
             finally:
                 catalog.close()
-            details.insert("1.0", json.dumps({"name": app["name"], "version": app.get("version"), "status": app["status"], "capability_coverage": coverage,
+            details.insert("1.0", json.dumps({"name": app["name"], "version": app.get("version"), "status": app["status"], "local_installation_evidence": local_evidence, "capability_coverage": coverage,
                 "experiments": [plan for plan in experiments if plan], "tested_workflows": evidence, "blueprint": app["blueprint"], "error": app["error"]}, indent=2))
         tree.bind("<<TreeviewSelect>>", selected)
         def request_grant():
@@ -361,7 +389,7 @@ def launch(data_dir):
             try:
                 apps = catalog.apps()
                 if not apps:
-                    catalog.sync(scan_apps())
+                    scan_machine(catalog, scanner=scan_apps, desktop=WindowsDesktop)
                     apps = catalog.apps()
                 if mode == "run" and selected_handle is None:
                     from .task_director import TaskDirector, resolve_window
@@ -619,6 +647,7 @@ def launch(data_dir):
     ttk.Button(toolbar, text="Refresh windows", command=refresh).pack(side="left")
     ttk.Button(toolbar, text="Scan apps", command=scan_inventory).pack(side="left", padx=5)
     ttk.Button(toolbar, text="Apps & knowledge", command=show_apps).pack(side="left", padx=5)
+    ttk.Button(toolbar, text="Machine knowledge", command=show_machine).pack(side="left", padx=5)
     ttk.Button(toolbar, text="Open Calculator", command=lambda: subprocess.Popen(["calc.exe"])).pack(side="left", padx=5)
     ttk.Button(toolbar, text="Self-test", command=start_self_test).pack(side="left", padx=5)
     ttk.Button(toolbar, text="Learn all apps", command=start_campaign).pack(side="left", padx=5)

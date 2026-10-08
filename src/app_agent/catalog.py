@@ -23,6 +23,8 @@ class Catalog:
         CREATE TABLE IF NOT EXISTS workflows (id INTEGER PRIMARY KEY, app_id TEXT NOT NULL, generation INTEGER NOT NULL,
           task TEXT NOT NULL, outcome TEXT NOT NULL, record TEXT NOT NULL, created TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS scans (time TEXT NOT NULL, report TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS local_evidence (app_id TEXT NOT NULL, generation INTEGER NOT NULL,
+          body TEXT NOT NULL, observed TEXT NOT NULL, PRIMARY KEY(app_id,generation));
         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS interfaces (app_id TEXT NOT NULL, generation INTEGER NOT NULL, body TEXT NOT NULL,
           observed TEXT NOT NULL, PRIMARY KEY(app_id,generation));
@@ -91,7 +93,14 @@ class Catalog:
                     changed["new"].append(app["name"])
                 else:
                     old = json.loads(row["metadata"])
-                    if old.get("version", "") != app.get("version", "") or not row["present"]:
+                    previous_evidence = self.local_evidence(identity, row["generation"])
+                    incoming = snapshot.get("local_evidence", {}).get(identity)
+                    installation_changed = bool(previous_evidence and incoming and (
+                        (previous_evidence.get('identity_fingerprint') and incoming.get('identity_fingerprint') and
+                         previous_evidence['identity_fingerprint'] != incoming['identity_fingerprint']) or
+                        (previous_evidence.get('complete') and incoming.get('complete') and
+                         previous_evidence.get('fingerprint') != incoming.get('fingerprint'))))
+                    if old.get("version", "") != app.get("version", "") or not row["present"] or installation_changed:
                         self.db.execute("UPDATE apps SET metadata=?,present=1,generation=generation+1,status='queued',blueprint=NULL,error=NULL,attempts=0,retry_at=NULL,updated=? WHERE id=?", (json.dumps(app), timestamp, identity))
                         changed["updated"].append(app["name"])
                     else:
@@ -102,8 +111,23 @@ class Catalog:
                 if row["id"] not in seen and app["source"] in complete:
                     self.db.execute("UPDATE apps SET present=0,status='removed',updated=? WHERE id=?", (timestamp, row["id"]))
                     changed["removed"].append(app["name"])
+            for identity, body in snapshot.get('local_evidence', {}).items():
+                current = self.db.execute("SELECT generation FROM apps WHERE id=? AND present=1", (identity,)).fetchone()
+                if current:
+                    self.db.execute("INSERT INTO local_evidence VALUES (?,?,?,?) ON CONFLICT(app_id,generation) DO UPDATE SET body=excluded.body,observed=excluded.observed",
+                                    (identity, current[0], json.dumps({**body, 'observed_at': timestamp}), timestamp))
+            if snapshot.get('machine'):
+                self.db.execute("INSERT INTO settings VALUES ('machine_model',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (json.dumps(snapshot['machine']),))
+            changed_names = set(changed['new'] + changed['updated'])
+            if changed_names:
+                fresh = [app['id'] for app in snapshot['apps'] if app['name'] in changed_names]
+                self.db.execute("INSERT INTO settings VALUES ('onboarding_priority',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (json.dumps(fresh),))
             self.db.execute("INSERT INTO scans VALUES (?,?)", (timestamp, json.dumps(changed)))
         return changed
+
+    def local_evidence(self, identity, generation):
+        row = self.db.execute("SELECT body FROM local_evidence WHERE app_id=? AND generation=?", (identity, generation)).fetchone()
+        return json.loads(row[0]) if row else None
 
     def apps(self):
         return [{**json.loads(row["metadata"]), "generation": row["generation"], "status": row["status"],
@@ -123,7 +147,8 @@ class Catalog:
         candidates = [known[row[0]] for row in rows if row[0] in known]
         # Learn user-facing launchable apps before driver/utility registrations.
         priority = set(self.setting("priority_apps", []))
-        candidates.sort(key=lambda app: (app["id"] not in priority, not bool(app.get("app_id")), "calculator" not in app["name"].casefold(), app["name"].casefold()))
+        onboarding = set(self.setting("onboarding_priority", []))
+        candidates.sort(key=lambda app: (app["id"] not in priority, app["id"] not in onboarding, app.get('role') != 'platform', not bool(app.get("app_id") or app.get('launch_executable')), "calculator" not in app["name"].casefold(), app["name"].casefold()))
         return candidates[0] if candidates else None
 
     def save_blueprint(self, identity, generation, blueprint):

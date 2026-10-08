@@ -65,7 +65,7 @@ def study_campaign(catalog, cloud, emit, daily_limit=50, max_apps=5, max_plans=3
                 "SELECT app_id,generation,COUNT(*) FROM practice_plans GROUP BY app_id,generation")}
             apps = sorted(catalog.apps(), key=lambda app: (app["id"] not in priority,
                            counts.get((app["id"], app["generation"]), 0), not bool(app.get("app_id")), app["name"].casefold()))
-            candidate = next((app for app in apps if app["blueprint"] and catalog.next_practice_capability(app["id"], app["generation"])), None)
+            candidate = next((app for app in apps if app.get('role') != 'platform' and app["blueprint"] and catalog.next_practice_capability(app["id"], app["generation"])), None)
             if candidate is None:
                 break
             result = prepare_next_experiment(catalog, candidate, cloud, emit, daily_limit, cancel)

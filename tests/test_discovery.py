@@ -23,3 +23,11 @@ class DiscoveryTests(unittest.TestCase):
         apps = merge_inventory([], [], [{"name": "Store App", "family": "family", "version": "1"}])
         self.assertEqual(apps[0]["app_id"], "")
         self.assertEqual(apps[0]["source"], "store")
+
+
+    def test_start_shortcut_and_registry_icon_executables_are_linked_without_arguments(self):
+        registry = [{'name': 'Editor', 'version': '1', 'executables': ['C:/Apps/Editor.exe']}]
+        starts = [{'Name': 'Editor', 'AppID': 'Editor', 'executables': ['C:/Apps/Editor.exe']}]
+        result = merge_inventory(registry, starts, [])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]['executables'], ['C:/Apps/Editor.exe'])

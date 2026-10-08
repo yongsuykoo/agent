@@ -1,8 +1,10 @@
-# Automatic maintenance — 0.7.2
+# Automatic maintenance — 0.8.0
 
 Start `windows\ConnectNamed.cmd` once and leave **Automatic maintenance** checked. Enable AI jobs and enter the provider and tunnel keys locally. After starting, leave the helper open and the desktop unlocked. The local automatic cycle works even while this chat is closed; it does not require you to enter test tasks or upload reports.
 
-Version 0.7.2 adds the visible **No daily AI study/design cap** option. Selecting it saves `daily_limit=0` locally; the study worker uses that local choice instead of its request default. Clearing it selects five attempts/day. Existing saved main-app choices remain until changed locally. Study now reads apps in parallel, and registry signals can request an earlier inventory scan. See [PERFORMANCE.md](PERFORMANCE.md). Provider usage charges and rate limits remain.
+Version 0.8.0 adds local [machine onboarding](MACHINE_ONBOARDING.md) to the inventory cycle without extra clicks or provider calls. The report persists Windows build/services, app interfaces and local evidence. New/changed installations are prioritized, and stale evidence is separated by generation. The backend is compatible with existing 0.7+ signed worker hosts; the new Machine knowledge button and additional registry watches require launching the updated interface.
+
+Version 0.7.2 added the visible **No daily AI study/design cap** option. Selecting it saves `daily_limit=0` locally; the study worker uses that local choice instead of its request default. Clearing it selects five attempts/day. Existing saved main-app choices remain until changed locally. Study now reads apps in parallel, and registry signals can request an earlier inventory scan. See [PERFORMANCE.md](PERFORMANCE.md). Provider usage charges and rate limits remain.
 
 The cycle scans installed apps every five minutes or after an observed registry signal, waits for 60 seconds without input before a disposable Windows test, and studies batches of up to three apps using the persistent queue and the selected local usage setting. AI-enabled tests include generated speech; they do not record your microphone. A successful suite can run twice per worker version/day for repeatability. A failure is saved and suspends repeat testing of that version until a new worker release arrives. Research and tests incur provider charges when AI is enabled. Tests clear Calculator; avoid using the desktop while a test runs. Inactivity is checked before starting a test, not a guarantee that user input during the test is detected.
 

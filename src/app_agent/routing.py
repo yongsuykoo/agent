@@ -7,6 +7,7 @@ from .research import output_text
 
 
 def choose_app(task, apps, cloud):
+    apps = [app for app in apps if app.get('role') != 'platform']
     if not apps:
         raise RuntimeError("No apps discovered yet. Run Scan apps first.")
     query = normalized_name(task)
@@ -38,6 +39,14 @@ def window_matches(app, windows):
 
 def launch_app(app):
     app_id = app.get("app_id", "")
+    if not app_id and app.get('launch_source') == 'app_paths':
+        from pathlib import Path
+        from .local_inspection import safe_root
+        executable = Path(app.get('launch_executable', ''))
+        if executable.suffix.lower() != '.exe' or safe_root(str(executable.parent)) is None or executable.is_symlink() or not executable.is_file():
+            raise RuntimeError('Registered executable is unavailable; no launch performed.')
+        subprocess.Popen([str(executable)])
+        return
     if not isinstance(app_id, str) or not app_id or len(app_id) > 500 or not re.fullmatch(r"[\w .!{}\\/\-]+", app_id):
         raise RuntimeError("This app has no supported Start-menu launch identity. Open it yourself and select its window.")
     # The value must come from discovery, not a model-generated executable path.
