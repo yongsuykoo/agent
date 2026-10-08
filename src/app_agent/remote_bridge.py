@@ -189,7 +189,9 @@ class BridgeSession:
                 "time": datetime.now(timezone.utc).isoformat()}
 
 
-def make_server(session):
+def make_server(session, port=0):
+    if isinstance(port, bool) or not isinstance(port, int) or not 0 <= port <= 65535:
+        raise ValueError("Invalid local helper port.")
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             # Never log signatures, request contents, or response bodies.
@@ -264,6 +266,6 @@ def make_server(session):
                 super().process_request_thread(request, client_address)
             finally:
                 self.slots.release()
-    server = BoundedServer(("127.0.0.1", 0), Handler)
+    server = BoundedServer(("127.0.0.1", port), Handler)
     server.daemon_threads = True
     return server

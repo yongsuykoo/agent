@@ -10,6 +10,7 @@ from urllib.request import Request, build_opener, HTTPRedirectHandler
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from .remote_protocol import canonical, decode, decrypt_result, sign_request
 from .relay_diagnostics import BRIDGE_REJECTION
+from .connection_settings import public_hostname
 
 
 class NoRedirects(HTTPRedirectHandler):
@@ -18,12 +19,14 @@ class NoRedirects(HTTPRedirectHandler):
 
 
 class RemoteClient:
-    def __init__(self, pairing_link, keys, test_loopback=False):
+    def __init__(self, pairing_link, keys, test_loopback=False, allowed_hostname=None):
         parsed = urlsplit(pairing_link)
         loopback = test_loopback and parsed.scheme == "http" and parsed.hostname == "127.0.0.1"
-        if (not loopback and (parsed.scheme != "https" or not re.fullmatch(r"[a-z0-9-]+\.trycloudflare\.com", parsed.hostname or "")
+        expected = public_hostname(allowed_hostname) if allowed_hostname is not None else None
+        permitted = parsed.hostname == expected if expected else bool(re.fullmatch(r"[a-z0-9-]+\.trycloudflare\.com", parsed.hostname or ""))
+        if (not loopback and (parsed.scheme != "https" or not permitted
                              or parsed.port not in (None, 443))) or parsed.username or parsed.password or parsed.query or parsed.path not in ("", "/"):
-            raise ValueError("Pairing requires the helper's HTTPS trycloudflare.com link.")
+            raise ValueError("Pairing requires HTTPS/443 on the explicitly selected hostname or the helper's trycloudflare.com host.")
         fragment = parse_qs(parsed.fragment, strict_parsing=True)
         if set(fragment) != {"key"} or len(fragment["key"]) != 1:
             raise ValueError("Pairing link must include its Windows session public key.")
@@ -92,6 +95,7 @@ def controller_main(arguments=None):
     parser = argparse.ArgumentParser(description="Control fixed App Agent Windows test/research jobs")
     parser.add_argument("--pairing-link", required=True)
     parser.add_argument("--key-file", required=True, type=Path)
+    parser.add_argument("--allowed-host", help="Exact account-owned named-tunnel hostname; wildcards are unsupported")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--wait", action="store_true")
     parser.add_argument("operation", choices=("info", "inventory", "learning_report", "windows", "inspect_window", "self_test", "study", "task", "job", "stop"))
@@ -99,7 +103,7 @@ def controller_main(arguments=None):
     parser.add_argument("--job-id")
     args = parser.parse_args(arguments)
     try:
-        client = RemoteClient(args.pairing_link, ControllerKeys.load(args.key_file))
+        client = RemoteClient(args.pairing_link, ControllerKeys.load(args.key_file), allowed_hostname=args.allowed_host)
         if args.operation == "info":
             result = client.request("GET", "/info")
         elif args.operation == "stop":

@@ -16,6 +16,7 @@ from .research import validate_api_key
 from .connection_launcher import find_tunnel_executable
 from .relay_diagnostics import RelayDiagnostics, check_local_helper
 from .relay_launcher import start_relay, stop_relay
+from .connection_settings import public_hostname, tunnel_token, NAMED_TUNNEL_PORT
 
 
 def tunnel_executable():
@@ -25,15 +26,15 @@ def tunnel_executable():
     raise RuntimeError("Cloudflared is missing. Run windows\\Connect.cmd so WinGet can install the verified package.")
 
 
-def launch_connection(data_dir, controller_key):
+def launch_connection(data_dir, controller_key, named_hostname=None):
     if sys.platform != "win32":
         raise RuntimeError("The connection helper must be started on the Windows desktop.")
     public = json.loads(Path(controller_key).read_text(encoding="utf-8"))
     controller_fingerprint = fingerprint(public)
     executable = tunnel_executable()
     root = tk.Tk()
-    root.title("App Agent connection — 0.6.3")
-    root.geometry("900x650")
+    root.title("App Agent connection — 0.6.4")
+    root.geometry("920x820")
     frame = ttk.Frame(root, padding=16)
     frame.pack(fill="both", expand=True)
     ttk.Label(frame, text="Connect this Windows session to your cloud controller", font=("Segoe UI", 14)).pack(anchor="w")
@@ -49,6 +50,23 @@ def launch_connection(data_dir, controller_key):
     key = tk.StringVar()
     key_entry = ttk.Entry(frame, textvariable=key, show="*")
     key_entry.pack(fill="x")
+    named_mode = tk.BooleanVar(value=bool(named_hostname))
+    hostname = tk.StringVar(value=named_hostname or "")
+    relay_key = tk.StringVar()
+    named_checkbox = ttk.Checkbutton(frame, text="Use my Cloudflare domain (named tunnel)", variable=named_mode)
+    named_checkbox.pack(anchor="w", pady=(10, 0))
+    ttk.Label(frame, text=f"Hostname only; configure its Cloudflare service as HTTP 127.0.0.1:{NAMED_TUNNEL_PORT}").pack(anchor="w")
+    hostname_entry = ttk.Entry(frame, textvariable=hostname)
+    hostname_entry.pack(fill="x")
+    ttk.Label(frame, text="Cloudflare tunnel token or installation command — stays on this computer; never send it in chat").pack(anchor="w")
+    relay_key_entry = ttk.Entry(frame, textvariable=relay_key, show="*")
+    relay_key_entry.pack(fill="x")
+    def toggle_named():
+        mode = "normal" if named_mode.get() else "disabled"
+        hostname_entry.configure(state=mode)
+        relay_key_entry.configure(state=mode)
+    named_checkbox.configure(command=toggle_named)
+    toggle_named()
     status = tk.StringVar(value="Disconnected. Start creates a temporary outbound Cloudflare relay for up to two hours.")
     ttk.Label(frame, textvariable=status, wraplength=860).pack(anchor="w", pady=10)
     link = tk.StringVar()
@@ -61,7 +79,8 @@ def launch_connection(data_dir, controller_key):
     output.pack(fill="both", expand=True, pady=8)
     events = queue.Queue()
     state = {"session": None, "server": None, "tunnel": None, "worker": None, "closed": False,
-             "disconnecting": False, "local_ok": False, "registered_once": False, "relay_directory": None}
+             "disconnecting": False, "local_ok": False, "registered_once": False, "relay_directory": None,
+             "named_hostname": None}
     diagnostics = RelayDiagnostics()
     original_key = os.environ.get("AGENT_API_KEY")
     grants = {}
@@ -110,6 +129,8 @@ def launch_connection(data_dir, controller_key):
         if state["session"]:
             return
         try:
+            selected_hostname = public_hostname(hostname.get()) if named_mode.get() else None
+            selected_token = tunnel_token(relay_key.get()) if selected_hostname else None
             if key.get().strip():
                 os.environ["AGENT_API_KEY"] = validate_api_key(key.get().strip())
             if allow_cloud.get() and not (os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")):
@@ -140,20 +161,31 @@ def launch_connection(data_dir, controller_key):
                                     execute=lambda job, directory, cancel, emit: execute_job(job, directory, cancel, emit, task_permission),
                                     emit=lambda text: events.put(("log", text)), allow_tasks=allow_tasks.get())
             state["session"] = session
-            server = make_server(session)
+            state["named_hostname"] = selected_hostname
+            try:
+                server = make_server(session, NAMED_TUNNEL_PORT if selected_hostname else 0)
+            except OSError as error:
+                if selected_hostname:
+                    raise RuntimeError(f"Cannot bind the named-tunnel helper to 127.0.0.1:{NAMED_TUNNEL_PORT}. Close any older helper; configure that exact port in Cloudflare. No other program was stopped.") from error
+                raise
             state["server"] = server
             threading.Thread(target=server.serve_forever, daemon=True).start()
             state["local_ok"] = check_local_helper(server.server_port)
             if not state["local_ok"]:
                 raise RuntimeError("The local helper did not pass its HTTP check. Copy connection diagnostics.")
             append(f"Local helper HTTP check passed: http://127.0.0.1:{server.server_port}/info")
-            tunnel, relay_directory = start_relay(executable, server.server_port)
+            tunnel, relay_directory = start_relay(executable, server.server_port, named_token=selected_token)
             state["tunnel"] = tunnel
             state["relay_directory"] = relay_directory
-            append("Relay uses an isolated temporary configuration; existing account tunnel rules are not reused.")
+            append("Relay uses an isolated temporary configuration; existing local tunnel configuration is not reused.")
+            if selected_hostname:
+                diagnostics.url = "https://" + selected_hostname
+                append(f"Named tunnel selected: {selected_hostname}; Cloudflare service must be HTTP 127.0.0.1:{server.server_port}.")
             started = time.monotonic()
             def read_tunnel():
                 for line in tunnel.stdout:
+                    if selected_token:
+                        line = line.replace(selected_token, "[redacted]")
                     events.put(("relay_line", line[:2000]))
                 events.put(("tunnel_closed", None))
             threading.Thread(target=read_tunnel, daemon=True).start()
@@ -161,6 +193,10 @@ def launch_connection(data_dir, controller_key):
             start_button.configure(state="disabled")
             key.set("")
             key_entry.configure(state="disabled")
+            relay_key.set("")
+            relay_key_entry.configure(state="disabled")
+            hostname_entry.configure(state="disabled")
+            named_checkbox.configure(state="disabled")
             status.set("Connecting outbound relay…")
         except Exception as error:
             append(error)
@@ -174,7 +210,7 @@ def launch_connection(data_dir, controller_key):
 
     def copy_diagnostics():
         server, tunnel = state["server"], state["tunnel"]
-        report = diagnostics.report("0.6.3", controller_fingerprint,
+        report = diagnostics.report("0.6.4", controller_fingerprint,
                                     server.server_port if server else None,
                                     state["local_ok"] and not state["disconnecting"],
                                     tunnel is not None and tunnel.poll() is None)
@@ -237,6 +273,8 @@ def launch_connection(data_dir, controller_key):
                 break
             if kind == "relay_line":
                 diagnostics.observe(value)
+                if state["named_hostname"]:
+                    diagnostics.url = "https://" + state["named_hostname"]
                 if state["session"].active() and not state["disconnecting"]:
                     if diagnostics.ready:
                         state["registered_once"] = True

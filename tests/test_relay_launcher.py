@@ -61,3 +61,30 @@ class RelayLauncherTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     start_relay('cloudflared', port)
             process.assert_not_called()
+
+    def test_named_token_stays_out_of_arguments_config_and_parent_environment(self):
+        token = 'A' * 80
+        process = Mock()
+        process.poll.return_value = 0
+        def launch(arguments, **options):
+            self.assertNotIn(token, str(arguments))
+            self.assertNotIn('--url', arguments)
+            self.assertEqual(arguments[-3:], ['run', '--protocol', 'http2'])
+            self.assertEqual(options['env']['TUNNEL_TOKEN'], token)
+            self.assertNotIn('AGENT_API_KEY', options['env'])
+            config = Path(arguments[arguments.index('--config') + 1])
+            self.assertNotIn(token, config.read_text())
+            return process
+        with patch.dict(os.environ, {'TUNNEL_TOKEN': 'unrelated-original', 'AGENT_API_KEY': 'fake-api'}, clear=True), \
+             patch('app_agent.relay_launcher.subprocess.Popen', side_effect=launch):
+            child, directory = start_relay('cloudflared', 8765, named_token=token)
+            try:
+                self.assertEqual(os.environ['TUNNEL_TOKEN'], 'unrelated-original')
+            finally:
+                stop_relay(child, directory)
+
+    def test_invalid_named_token_is_rejected_before_launch(self):
+        with patch('app_agent.relay_launcher.subprocess.Popen') as process:
+            with self.assertRaises(ValueError):
+                start_relay('cloudflared', 8765, named_token='cloudflared.exe service install short')
+            process.assert_not_called()

@@ -279,3 +279,42 @@ class ConnectionIntegrationTests(unittest.TestCase):
                      "https://example.trycloudflare.com", "https://example.trycloudflare.com#key=AAA"):
             with self.subTest(link=link), self.assertRaises(ValueError):
                 RemoteClient(link, self.keys)
+
+    def test_custom_hostname_requires_explicit_exact_selection(self):
+        link = 'https://agent.papaprint.store#key=' + self.session.public_key
+        with self.assertRaises(ValueError):
+            RemoteClient(link, self.keys)
+        client = RemoteClient(link, self.keys, allowed_hostname='agent.papaprint.store')
+        self.assertEqual(client.base, 'https://agent.papaprint.store')
+        for address in ('https://agent.papaprint.store.other.example', 'http://agent.papaprint.store',
+                        'https://agent.papaprint.store:8443', 'https://user@agent.papaprint.store',
+                        'https://agent.papaprint.store/path'):
+            with self.subTest(address=address), self.assertRaises(ValueError):
+                RemoteClient(address + '#key=' + self.session.public_key, self.keys, allowed_hostname='agent.papaprint.store')
+        with self.assertRaises(ValueError):
+            RemoteClient(link, self.keys, allowed_hostname='*.papaprint.store')
+
+    def test_named_hostname_preserves_crypto_with_simulated_https_transport(self):
+        from urllib.parse import urlsplit
+        actual = build_opener(ProxyHandler({}))
+        def simulated_https(request, timeout):
+            self.assertTrue(request.full_url.startswith('https://agent.papaprint.store/'))
+            local = Request(self.base + urlsplit(request.full_url).path, data=request.data,
+                            headers=dict(request.header_items()), method=request.get_method())
+            return actual.open(local, timeout=timeout)
+        client = RemoteClient('https://agent.papaprint.store#key=' + self.session.public_key,
+                              self.keys, allowed_hostname='agent.papaprint.store')
+        with patch('app_agent.remote_client.build_opener') as transport:
+            transport.return_value.open.side_effect = simulated_https
+            self.assertTrue(client.request('GET', '/info')['active'])
+            wrong = encode(raw_public(Ed25519PrivateKey.generate().public_key()))
+            client = RemoteClient('https://agent.papaprint.store#key=' + wrong,
+                                  self.keys, allowed_hostname='agent.papaprint.store')
+            with self.assertRaises(InvalidSignature):
+                client.request('GET', '/info')
+        self.assertEqual(self.calls, [])
+
+    def test_busy_fixed_port_is_not_replaced_with_another_port(self):
+        with self.assertRaises(OSError):
+            make_server(self.session, port=self.server.server_port)
+        self.assertTrue(self.client.request('GET', '/info')['active'])

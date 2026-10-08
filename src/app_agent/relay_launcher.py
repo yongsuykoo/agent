@@ -1,11 +1,12 @@
-"""Launch only this helper's origin without reusing account tunnel settings."""
+"""Launch the selected relay without inheriting unrelated local tunnel settings."""
 import os
 from pathlib import Path
 import subprocess
 import tempfile
+from .connection_settings import tunnel_token
 
 
-def start_relay(executable, port):
+def start_relay(executable, port, named_token=None):
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
         raise ValueError("Invalid local helper port.")
     directory = tempfile.TemporaryDirectory(prefix="app-agent-relay-")
@@ -17,9 +18,13 @@ def start_relay(executable, port):
         environment = {name: value for name, value in os.environ.items()
                        if not name.upper().startswith("TUNNEL_") and name.upper() not in
                        {"NO_TLS_VERIFY", "AGENT_API_KEY", "OPENAI_API_KEY"}}
-        tunnel = subprocess.Popen([str(executable), "tunnel", "--config", str(config),
-                                   "--url", f"http://127.0.0.1:{port}",
-                                   "--no-autoupdate", "--protocol", "http2"],
+        command = [str(executable), "tunnel", "--config", str(config), "--no-autoupdate"]
+        if named_token is None:
+            command += ["--protocol", "http2", "--url", f"http://127.0.0.1:{port}"]
+        else:
+            environment["TUNNEL_TOKEN"] = tunnel_token(named_token)
+            command += ["run", "--protocol", "http2"]
+        tunnel = subprocess.Popen(command,
                                   env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                   text=True, encoding="utf-8", errors="replace",
                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))

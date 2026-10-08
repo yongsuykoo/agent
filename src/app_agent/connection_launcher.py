@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from .connection_settings import public_hostname
 
 
 def find_tunnel_executable():
@@ -56,6 +57,7 @@ def main(arguments=None):
     parser = argparse.ArgumentParser(description="Start the Windows companion through Python")
     parser.add_argument("--controller-key", required=True, type=Path)
     parser.add_argument("--data-dir", type=Path, default=Path(os.getenv("LOCALAPPDATA", str(Path.home()))) / "AppAgent")
+    parser.add_argument("--hostname", help="Prefill account-owned named-tunnel mode; never supply tokens on the command line")
     args = parser.parse_args(arguments)
     try:
         if sys.platform != "win32":
@@ -64,9 +66,13 @@ def main(arguments=None):
         import json
         from .remote_protocol import fingerprint
         fingerprint(json.loads(args.controller_key.read_text(encoding="utf-8")))
+        named_hostname = public_hostname(args.hostname) if args.hostname else None
         ensure_tunnel_executable()
         from .remote_ui import launch_connection
-        launch_connection(args.data_dir, args.controller_key)
+        if named_hostname:
+            launch_connection(args.data_dir, args.controller_key, named_hostname=named_hostname)
+        else:
+            launch_connection(args.data_dir, args.controller_key)
         return 0
     except Exception as error:
         print("Connection setup failed: " + str(error))
