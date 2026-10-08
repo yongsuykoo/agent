@@ -131,6 +131,10 @@ class TaskDirector:
         self.cancel,self.resolve,self.runner = cancel or threading.Event(),resolve,runner
 
     def run(self, task, use_vision=False):
+        from .logo_design import logo_request
+        if logo_request(task):
+            from .native_tasks import run_logo
+            return run_logo(self, task)
         records, verified = [], []
         outcome = 'error'
         try:

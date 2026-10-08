@@ -32,9 +32,17 @@ def choose_app(task, apps, cloud):
 def window_matches(app, windows):
     # Ignore taskbar titles that reveal account/credential pages during auto-route.
     aliases = [normalized_name(name) for name in app.get("aliases", [app["name"]])]
+    # Photoshop puts its application name before the open document. Native
+    # tasks additionally bind the COM application to this window's process.
+    photoshop = bool(re.search(r'\bphotoshop\b', app['name'], re.I))
+    def matches(title):
+        normal = normalized_name(title)
+        if any(alias and (normal == alias or normal.endswith(' ' + alias)) for alias in aliases):
+            return True
+        return photoshop and bool(re.match(r'^(?:Adobe\s+)?Photoshop(?:\s+(?:CS\d|CC(?:\s+\d{4})?|\d{4}))?(?:\s*[-—\[]|$)', title, re.I)) and not re.search(r'\b(?:Google Chrome|Microsoft Edge|Mozilla Firefox)\s*$', title, re.I)
     return [(handle, title) for handle, title in windows
             if not any(term in title.casefold() for term in ("api keys", "password", "sign in", "log in"))
-            and any(alias and (normalized_name(title) == alias or normalized_name(title).endswith(" " + alias)) for alias in aliases)]
+            and matches(title)]
 
 
 def launch_app(app):

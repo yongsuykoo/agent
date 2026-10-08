@@ -1,5 +1,7 @@
 # Personal task engine — 0.7.1
 
+Version 0.9.0 routes logo requests through the [native Photoshop adapter](CREATIVE_TASKS.md). Its `artifacts_verified` outcome checks exported files and retains separate artifact recipes. Accessibility workflows and remote grants retain their existing scope.
+
 Version 0.7.2 adds guarded local workflow replay, cached verified plans and deferred provider construction. These allow an eligible repeated task to finish without cloud calls; new or changed situations return to planning. See [PERFORMANCE.md](PERFORMANCE.md) for parallel study, uncapped usage, event-triggered inventory and acceptance evidence.
 
 The Windows app's default automatic mode accepts a submitted goal, chooses from the discovered inventory, and plans one to four ordered app steps. It finds the matching window or launches the discovered Start-menu identity. When several documents match, it attempts to identify a newly opened window instead of arbitrarily choosing an existing document.

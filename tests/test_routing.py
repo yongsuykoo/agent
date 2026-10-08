@@ -27,6 +27,12 @@ class RoutingTests(unittest.TestCase):
         matches = window_matches(browser, [(1, "API keys - Google Chrome"), (2, "New Tab - Google Chrome"), (3, "Calculator")])
         self.assertEqual(matches, [(2, "New Tab - Google Chrome")])
 
+    def test_photoshop_title_prefix_supports_open_documents_and_excludes_browser_tabs(self):
+        photoshop = {'name':'Adobe Photoshop CS2','aliases':['Adobe Photoshop CS2']}
+        windows = [(1,'Adobe Photoshop CS2 - [User document @ 100%]'), (2,'Adobe Photoshop'),
+                   (3,'Adobe Photoshop - Tutorial - Google Chrome'), (4,'Photoshop 2024 - [Untitled-1]')]
+        self.assertEqual(window_matches(photoshop,windows),[windows[0],windows[1],windows[3]])
+
     def test_launch_only_uses_discovered_start_identity(self):
         with patch("app_agent.routing.subprocess.Popen") as popen:
             launch_app(app())

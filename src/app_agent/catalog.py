@@ -22,6 +22,8 @@ class Catalog:
           attempts INTEGER NOT NULL DEFAULT 0, retry_at TEXT, updated TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS workflows (id INTEGER PRIMARY KEY, app_id TEXT NOT NULL, generation INTEGER NOT NULL,
           task TEXT NOT NULL, outcome TEXT NOT NULL, record TEXT NOT NULL, created TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS artifact_workflows (id INTEGER PRIMARY KEY, app_id TEXT NOT NULL,
+          generation INTEGER NOT NULL, task TEXT NOT NULL, record TEXT NOT NULL, created TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS scans (time TEXT NOT NULL, report TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS local_evidence (app_id TEXT NOT NULL, generation INTEGER NOT NULL,
           body TEXT NOT NULL, observed TEXT NOT NULL, PRIMARY KEY(app_id,generation));
@@ -35,6 +37,7 @@ class Catalog:
           attempts INTEGER NOT NULL DEFAULT 0, updated TEXT NOT NULL,
           PRIMARY KEY(app_id,generation,capability));
         CREATE INDEX IF NOT EXISTS workflow_app_generation ON workflows(app_id,generation);
+        CREATE INDEX IF NOT EXISTS artifact_app_generation ON artifact_workflows(app_id,generation);
         CREATE INDEX IF NOT EXISTS practice_app_generation ON practice_attempts(app_id,generation,capability);
         """)
 
@@ -172,6 +175,22 @@ class Catalog:
                 return False
             self.db.execute("INSERT INTO workflows (app_id,generation,task,outcome,record,created) VALUES (?,?,?,?,?,?)", (identity, generation, record["task"], record["outcome"], json.dumps(record), now()))
         return True
+
+    def save_artifact_workflow(self, identity, generation, record):
+        if record.get('outcome') != 'artifact_verified' or record.get('verification', {}).get('status') != 'artifact_verified':
+            return False
+        with self.db:
+            current = self.db.execute('SELECT generation,present FROM apps WHERE id=?', (identity,)).fetchone()
+            if not current or not current['present'] or current['generation'] != generation:
+                return False
+            self.db.execute('INSERT INTO artifact_workflows (app_id,generation,task,record,created) VALUES (?,?,?,?,?)',
+                (identity, generation, record['task'], json.dumps(record), now()))
+        return True
+
+    def artifact_recipe(self, identity, generation, task):
+        row = self.db.execute('SELECT record FROM artifact_workflows WHERE app_id=? AND generation=? AND task=? ORDER BY id DESC LIMIT 1',
+                              (identity, generation, task)).fetchone()
+        return json.loads(row[0]) if row else None
 
     def workflows(self, identity, generation):
         rows = self.db.execute("SELECT task,record FROM workflows WHERE app_id=? AND generation=? ORDER BY id DESC LIMIT 5", (identity, generation)).fetchall()
