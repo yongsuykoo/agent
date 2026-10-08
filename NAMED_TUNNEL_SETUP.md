@@ -1,4 +1,4 @@
-# Connect through agent.papaprint.store — 0.6.9
+# Connect through agent.papaprint.store — 0.7.0
 
 This uses a dedicated hostname in your Cloudflare account. It gives you control over that hostname's routing and security settings. It does not guarantee that the cloud connection will succeed: the controller must receive and authenticate the helper's response before any Windows tests begin.
 
@@ -25,7 +25,7 @@ The full hostname is **agent.papaprint.store**. The origin is **http://127.0.0.1
 ## 2. Start the updated Windows helper
 
 1. Close the old App Agent and connection helper. Download the [Windows test kit](downloads/app-agent-windows-test-kit.zip), extract it into a **new folder**, and run `windows\Setup.cmd` inside that folder.
-2. Run **`windows\ConnectNamed.cmd`**. It opens App Agent connection **0.6.9**, with named mode enabled and **agent.papaprint.store** filled in.
+2. Run **`windows\ConnectNamed.cmd`**. It opens App Agent connection **0.7.0**, with named mode enabled and **agent.papaprint.store** filled in.
 3. Paste the token or copied installation command into the **Cloudflare tunnel token** masked field. It is used only in the cloudflared child process environment; it is not saved to a file or placed in the process command line. The helper's diagnostic output redacts it.
 4. Leave automatic Windows tests enabled. AI tests and documentation research are optional: enter your OpenAI API key in the separate local masked field and enable the AI option when wanted. They incur provider usage charges.
 5. Click **Start connection** and accept its scope prompt. Leave the helper open. After registration, click **Copy connection diagnostics** and send the copied report to the testing chat. It includes the public pairing link; it contains no tunnel token or provider key.
@@ -66,3 +66,5 @@ Version 0.6.7 adds observed editor control context, one bounded follow-up docume
 On October 8, 2026, the authenticated **0.6.7** Windows suite passed **all 13 checks**, with zero failed/skipped/cancelled checks. Calculator verified 45 after seven model-selected actions. Independent Notepad practice recovered from an unsupported initial plan through one additional technical documentation study: ten capabilities documented, its own text experiment generated, one typing action executed, and exact editor text verified. The isolated test catalog records one observed capability and nine untested capabilities. A read-only persistent report confirmed that ten documented apps, 45 unverified capabilities and three unexecuted plans survived the helper restart. These results establish the tested workflows; broader app families, repeated practice, real update adaptation, microphone use and live cancellation remain acceptance gaps. Full evidence remains private in ignored `remote-results/067-self-test.json` and `067-learning-report.json`.
 
 Latest live 0.6.8 acceptance passed 12 checks and failed two (follow-up capability extraction and spoken command routing). Native process IDs, exact-process inspection, ready-plan reporting and authenticated idle STOP were verified. Version 0.6.9 fixes extraction validation/retry and spoken delimiters; all 200 cloud and fresh installed-wheel tests pass, while live verification remains pending. Close the old helper, use Setup.cmd and ConnectNamed.cmd in a fresh extracted folder, and reauthenticate its new pairing link. The fixed API cannot update itself. No tunnel/DNS changes are required. See WINDOWS_CONNECTION.md for optional generated-speech testing and retained evidence.
+
+Version 0.7.0 adds an automatic mode with a stable connection host and signed worker updates. After this one local installation, routine worker fixes no longer need helper restarts or new pairing links. Automatic mode is explicitly shown at startup, uses an eight-hour session, checks idle before tests, retains failures, and studies up to five apps/day within existing budgets. See AUTOMATIC_MODE.md for limits and pending live acceptance.

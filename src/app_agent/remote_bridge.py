@@ -109,7 +109,9 @@ def execute_job(job, data_dir, cancel, emit, task_permission=None):
                         plans.append({"app_id": app["id"], "generation": app["generation"], "app": app["name"],
                                       "plan": saved["body"], "status": "ready_unexecuted"})
             return {"overview": catalog.learning_overview(), "campaign": catalog.setting("campaign_state", {}),
-                    "ready_experiments": plans}
+                    "ready_experiments": plans,
+                    "automatic_progress": json.loads((Path(data_dir) / 'automatic-progress.json').read_text(encoding='utf-8'))
+                    if (Path(data_dir) / 'automatic-progress.json').is_file() else None}
         if operation == "study":
             from .campaign import study_campaign
             from .research import CloudResearcher
@@ -213,7 +215,8 @@ class BridgeSession:
         return {"version": version("app-agent"), "active": self.active(), "allow_cloud": self.allow_cloud,
                 "allow_tests": self.allow_tests, "allow_tasks": self.allow_tasks, "operations": sorted(OPERATIONS),
                 "seconds_remaining": max(0, int(self.expires - time.monotonic())),
-                "time": datetime.now(timezone.utc).isoformat()}
+                "time": datetime.now(timezone.utc).isoformat(),
+                "worker_version": self.worker_version() if hasattr(self, 'worker_version') else version('app-agent')}
 
 
 def make_server(session, port=0):

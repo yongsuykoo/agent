@@ -33,7 +33,7 @@ def launch_connection(data_dir, controller_key, named_hostname=None):
     controller_fingerprint = fingerprint(public)
     executable = tunnel_executable()
     root = tk.Tk()
-    root.title("App Agent connection — 0.6.9")
+    root.title("App Agent connection — 0.7.0")
     root.geometry("920x820")
     frame = ttk.Frame(root, padding=16)
     frame.pack(fill="both", expand=True)
@@ -46,6 +46,9 @@ def launch_connection(data_dir, controller_key, named_hostname=None):
     ttk.Checkbutton(frame, text="Allow automatic Windows self-tests", variable=allow_tests).pack(anchor="w", pady=6)
     ttk.Checkbutton(frame, text="Allow AI self-tests and documentation research (provider usage charges)", variable=allow_cloud).pack(anchor="w")
     ttk.Checkbutton(frame, text="Enable cloud app tasks — I will grant controls in disposable windows locally", variable=allow_tasks).pack(anchor="w")
+    automatic = tk.BooleanVar(value=True)
+    ttk.Checkbutton(frame, text="Automatic maintenance: signed worker updates, idle tests and up to 5 app studies/day", variable=automatic).pack(anchor="w")
+    ttk.Label(frame, text="Automatic mode keeps this connection for up to 8 hours. Tests start after 60 seconds without input; avoid using the desktop during a test. AI tests/research incur provider charges.", wraplength=860).pack(anchor="w")
     ttk.Label(frame, text="OpenAI API key — optional; stays on this Windows computer for this session").pack(anchor="w", pady=(10, 0))
     key = tk.StringVar()
     key_entry = ttk.Entry(frame, textvariable=key, show="*")
@@ -67,7 +70,7 @@ def launch_connection(data_dir, controller_key, named_hostname=None):
         relay_key_entry.configure(state=mode)
     named_checkbox.configure(command=toggle_named)
     toggle_named()
-    status = tk.StringVar(value="Disconnected. Start creates a temporary outbound Cloudflare relay for up to two hours.")
+    status = tk.StringVar(value="Disconnected. Automatic mode keeps the connection for up to eight hours; manual mode for two hours.")
     ttk.Label(frame, textvariable=status, wraplength=860).pack(anchor="w", pady=10)
     link = tk.StringVar()
     entry = ttk.Entry(frame, textvariable=link, state="readonly")
@@ -137,7 +140,8 @@ def launch_connection(data_dir, controller_key, named_hostname=None):
                 raise RuntimeError("Enter the API key locally or turn off AI jobs. Never paste the key in chat.")
             if allow_tasks.get() and not allow_cloud.get():
                 raise RuntimeError("App tasks need the AI jobs option enabled.")
-            if not messagebox.askokcancel("Start Windows connection", "Authorize this pinned cloud controller to inspect installed apps/window text and run the enabled tests/research for up to two hours? Results are encrypted to that controller. The temporary relay uses Cloudflare. You can STOP at any time."):
+            duration = 8 * 3600 if automatic.get() else 2 * 3600
+            if not messagebox.askokcancel("Start Windows connection", f"Authorize this pinned cloud controller and the enabled local automatic cycle for up to {duration // 3600} hours? Automatic mode checks controller-signed worker updates, runs tests when idle, and studies up to five apps/day. Existing app-control grants are still required. Results stay local or encrypted to the controller. You can STOP at any time."):
                 return
             def failed(error):
                 if state["session"]:
@@ -157,10 +161,17 @@ def launch_connection(data_dir, controller_key, named_hostname=None):
                         pending["event"].set()
                         return None
                 return pending["grant"]
-            session = BridgeSession(public, worker.submit, data_dir, allow_cloud.get(), allow_tests.get(),
-                                    execute=lambda job, directory, cancel, emit: execute_job(job, directory, cancel, emit, task_permission),
+            from .worker_update import WorkerUpdates
+            from .maintenance import Maintenance
+            updates = WorkerUpdates(data_dir, public, enabled=automatic.get())
+            maintenance = Maintenance(data_dir, enabled=automatic.get(), emit=lambda text: events.put(("log", text)))
+            state['updates'], state['maintenance'] = updates, maintenance
+            state['next_maintenance'] = 0
+            session = BridgeSession(public, worker.submit, data_dir, allow_cloud.get(), allow_tests.get(), duration=duration,
+                                    execute=lambda job, directory, cancel, emit: updates.execute(job, directory, cancel, emit, task_permission),
                                     emit=lambda text: events.put(("log", text)), allow_tasks=allow_tasks.get())
             state["session"] = session
+            session.worker_version = lambda: updates.version
             state["named_hostname"] = selected_hostname
             try:
                 server = make_server(session, NAMED_TUNNEL_PORT if selected_hostname else 0)
@@ -210,7 +221,7 @@ def launch_connection(data_dir, controller_key, named_hostname=None):
 
     def copy_diagnostics():
         server, tunnel = state["server"], state["tunnel"]
-        report = diagnostics.report("0.6.9", controller_fingerprint,
+        report = diagnostics.report("0.7.0", controller_fingerprint,
                                     server.server_port if server else None,
                                     state["local_ok"] and not state["disconnecting"],
                                     tunnel is not None and tunnel.poll() is None)
@@ -293,6 +304,21 @@ def launch_connection(data_dir, controller_key, named_hostname=None):
                 stop()
             else:
                 append(value)
+        if state['session'] and state['session'].active() and state.get('maintenance') and not state.get('maintenance_queued') and time.monotonic() >= state.get('next_maintenance', 0):
+            state['next_maintenance'] = time.monotonic() + 10
+            state['maintenance_queued'] = True
+            def maintain():
+                try:
+                    if not state['session'].active():
+                        return
+                    updates = state['updates']
+                    with updates.lock:
+                        updates.check(lambda text: events.put(('log', text)))
+                    from .maintenance import idle_seconds
+                    state['maintenance'].tick(state['session'], updates.version, idle_seconds())
+                finally:
+                    state['maintenance_queued'] = False
+            state['worker'].submit(maintain)
         if state["session"] and (not state["session"].active() or
                 (not state["registered_once"] and time.monotonic() - state.get("started", time.monotonic()) > 90)):
             if state["tunnel"] and state["tunnel"].poll() is None:

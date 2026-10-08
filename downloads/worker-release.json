@@ -1,0 +1,10 @@
+{
+  "release": {
+    "version": "0.7.0",
+    "minimum_host": "0.7.0",
+    "protocol": 1,
+    "sha256": "2bd4ebd5bb224fc6c1f51f906826cd721a0e6c5b5dc325fd59547f962a86fda7",
+    "size": 83622
+  },
+  "signature": "isq4Le4uVyvRTW1JW1htIuMReDapyGiCc-VBkvHm90L1FdWW5rULMxWMVBxTEn4rhAb3iqHMmLtYHp9QcHFJBw"
+}
