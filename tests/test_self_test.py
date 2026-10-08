@@ -181,6 +181,22 @@ class SelfTestTests(unittest.TestCase):
             self.assertEqual(planner.call_count, 1)
             fixture.desktop.act.assert_not_called()
 
+    def test_classic_editor_uses_its_observed_native_class_to_select_technical_references(self):
+        from app_agent.learning import PracticeUnavailable
+        blueprint = {"capabilities": [{"name": "Modern AI rewrite"}]}
+        with tempfile.TemporaryDirectory() as directory, \
+             patch("app_agent.learning.research_app", return_value=blueprint), \
+             patch("app_agent.self_test.research_app", side_effect=RuntimeError("Stop after source selection")) as research, \
+             patch("app_agent.self_test.practice_task", side_effect=PracticeUnavailable({"risk": "unsupported"})):
+            fixture = self.fixture(directory)
+            fixture.desktop.observe.return_value["controls"][0]["class_name"] = "Edit"
+            with self.assertRaisesRegex(RuntimeError, "Stop after source selection"):
+                learning_experiment(fixture, Mock(), directory, threading.Event(), lambda text: None)
+            self.assertEqual(research.call_args.kwargs["urls"], [
+                "https://learn.microsoft.com/en-us/windows/win32/controls/edit-controls",
+                "https://learn.microsoft.com/en-us/windows/win32/controls/about-edit-controls"])
+            fixture.desktop.act.assert_not_called()
+
     def test_save_does_not_send_shortcut_into_other_foreground_window(self):
         functions = types.SimpleNamespace(GetForegroundWindow=lambda: 999)
         package = types.ModuleType("pywinauto")
@@ -216,7 +232,7 @@ class SelfTestTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "interactive Windows"):
                 self_test("unused")
 
-    def test_entire_suite_runs_tasks_and_verifies_report_with_simulated_windows(self, changed_process=False, learning_failure=False):
+    def test_entire_suite_runs_tasks_and_verifies_report_with_simulated_windows(self, changed_process=False, learning_failure=False, with_voice=False, bad_transcript=False):
         from test_catalog import app, snapshot as inventory_snapshot
         class Desktop:
             def __init__(self, title, calculator=False):
@@ -281,11 +297,26 @@ class SelfTestTests(unittest.TestCase):
              patch("app_agent.learning.research_app", side_effect=RuntimeError("Documentation unavailable") if learning_failure else None,
                    return_value=blueprint) as research, \
              patch.object(NotepadFixture, "open", open_fixture), \
-             patch("app_agent.self_test.WindowsDesktop") as windows:
+             patch("app_agent.self_test.WindowsDesktop") as windows, \
+             patch("app_agent.voice.synthetic_test_audio", return_value=b"synthetic fixture") as speech, \
+             patch("app_agent.voice.transcribe", return_value="Delete the document" if bad_transcript else "Replace the document text with exactly: Voice command verified."):
             # Other Calculator windows must not affect the established fixture.
             windows.windows.return_value = [(41, "Calculator"), (42, "Calculator")]
             windows.return_value = calculator
-            report = self_test(directory, cloud=Cloud(), emit=lambda text: None)
+            report = self_test(directory, cloud=Cloud(), emit=lambda text: None, with_voice=with_voice)
+            if with_voice:
+                speech.assert_called_once()
+                check = report["checks"][-1]
+                if bad_transcript:
+                    self.assertEqual(check["status"], "failed")
+                    self.assertIn("no editor action", check["error"])
+                    self.assertEqual(report["counts"]["passed"], 13)
+                    return
+                self.assertEqual(check["status"], "passed")
+                self.assertIn("microphone not tested", check["details"]["audio_source"])
+                self.assertEqual(report["counts"]["passed"], 14)
+                self.assertEqual(check["details"]["actions_executed"], 1)
+                return
             if changed_process:
                 self.assertEqual(report["status"], "failed")
                 self.assertEqual(report["counts"]["failed"], 1)
@@ -320,6 +351,12 @@ class SelfTestTests(unittest.TestCase):
 
     def test_learning_research_failure_does_not_hide_other_windows_results(self):
         self.test_entire_suite_runs_tasks_and_verifies_report_with_simulated_windows(learning_failure=True)
+
+    def test_synthetic_speech_command_executes_and_verifies_disposable_editor(self):
+        self.test_entire_suite_runs_tasks_and_verifies_report_with_simulated_windows(with_voice=True)
+
+    def test_changed_speech_transcript_is_rejected_before_editing(self):
+        self.test_entire_suite_runs_tasks_and_verifies_report_with_simulated_windows(with_voice=True, bad_transcript=True)
 
     def test_entire_simulated_suite_with_windows_newline_translation(self):
         original = Path.write_text

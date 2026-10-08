@@ -73,6 +73,64 @@ class ProtocolTests(unittest.TestCase):
 
 
 class JobPolicyTests(unittest.TestCase):
+    def test_optional_result_identity_is_validated_without_expanding_job_scope(self):
+        job = self.task()
+        job["parameters"]["result_control_id"] = "CalculatorResults"
+        self.assertEqual(validate_job(job, True, True, allow_tasks=True)["parameters"]["result_control_id"], "CalculatorResults")
+        for value in (None, "", 1, "a" * 501):
+            job["parameters"]["result_control_id"] = value
+            with self.assertRaises(ValueError):
+                validate_job(job, True, True, allow_tasks=True)
+
+    def test_missing_result_control_blocks_before_permission_or_mutation(self):
+        from app_agent.catalog import Catalog
+        from test_catalog import app, snapshot
+        job = self.task()
+        job["parameters"]["result_control_id"] = "missing"
+        permission = Mock()
+        with tempfile.TemporaryDirectory() as directory:
+            catalog = Catalog(directory);catalog.sync(snapshot([app(identity="test-app")]));catalog.close()
+            with patch("app_agent.desktop.WindowsDesktop") as desktop:
+                desktop.return_value.observe.return_value = {"process_id": 81, "controls": []}
+                with self.assertRaisesRegex(RuntimeError, "result control is unavailable"):
+                    execute_job(job, directory, threading.Event(), lambda text: None, permission)
+                permission.assert_not_called()
+                desktop.return_value.act.assert_not_called()
+
+    def test_speech_tests_require_local_cloud_scope_and_boolean_options(self):
+        good = {"operation": "self_test", "parameters": {"with_cloud": True, "with_voice": True}}
+        self.assertEqual(validate_job(good, True, True)["parameters"], good["parameters"])
+        for job, scope in ((good, False), ({"operation": "self_test", "parameters": {"with_voice": True}}, True),
+                           ({"operation": "self_test", "parameters": {"with_cloud": True, "with_voice": 1}}, True)):
+            with self.assertRaises(ValueError):
+                validate_job(job, True, scope)
+
+    def test_window_listing_returns_verified_process_ids_and_omits_disappeared_windows(self):
+        with patch("app_agent.desktop.WindowsDesktop") as desktop, \
+             patch("app_agent.desktop.window_process_id", side_effect=[81, RuntimeError("Window closed")]) as identity:
+            desktop.windows.return_value = [(41, "Test editor"), (42, "Gone"), (43, "App Agent connection")]
+            result = execute_job({"operation": "windows", "parameters": {}}, "unused", threading.Event(), lambda text: None)
+            self.assertEqual(result, {"windows": [{"window_handle": 41, "title": "Test editor", "process_id": 81}]})
+            self.assertEqual(identity.call_count, 2)
+            desktop.assert_not_called()
+
+    def test_learning_report_returns_only_current_ready_plans_without_executing_them(self):
+        from app_agent.catalog import Catalog
+        from test_catalog import app, snapshot
+        with tempfile.TemporaryDirectory() as directory:
+            catalog = Catalog(directory)
+            catalog.sync(snapshot([app(identity="test-app")]))
+            catalog.save_blueprint("test-app", 1, {"capabilities": [{"name": "Write"}, {"name": "Other"}]})
+            plan = {"task": "Type exactly: Hello", "expected_result": "Hello", "capability_name": "Write", "risk": "disposable"}
+            catalog.save_practice_plan("test-app", 1, plan)
+            catalog.defer_practice_plan("test-app", 1, "Other", "Unsupported")
+            catalog.close()
+            result = execute_job({"operation": "learning_report", "parameters": {}}, directory, threading.Event(), lambda text: None)
+            self.assertEqual(len(result["ready_experiments"]), 1)
+            self.assertEqual(result["ready_experiments"][0]["plan"], plan)
+            self.assertEqual(result["ready_experiments"][0]["status"], "ready_unexecuted")
+            self.assertEqual(result["overview"]["capabilities_tested_once"], 0)
+
     def task(self):
         return {"operation": "task", "parameters": {"app_id": "test-app", "generation": 1, "window_handle": 41,
                                                      "process_id": 81, "task": "Type exactly: Hello", "expected_result": "Hello"}}
@@ -266,6 +324,14 @@ class ConnectionIntegrationTests(unittest.TestCase):
     def test_local_startup_probe_reaches_bridge_without_executing_jobs(self):
         from app_agent.relay_diagnostics import check_local_helper
         self.assertTrue(check_local_helper(self.server.server_port))
+        self.assertEqual(self.calls, [])
+
+    def test_stop_rejects_extra_commands_and_accepts_signed_empty_json(self):
+        with self.assertRaisesRegex(RuntimeError, "Unsupported route"):
+            self.client.request("POST", "/stop", {"command": "inventory"})
+        self.assertTrue(self.client.request("GET", "/info")["active"])
+        self.assertTrue(self.client.request("POST", "/stop")["stopped"])
+        self.assertFalse(self.session.active())
         self.assertEqual(self.calls, [])
 
     def test_external_http_failures_do_not_claim_a_helper_authentication_failure(self):

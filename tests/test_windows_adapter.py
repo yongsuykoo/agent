@@ -4,6 +4,23 @@ from app_agent.desktop import WindowsDesktop, foreground_window, literal_keys, t
 
 
 class DesktopAdapterTests(unittest.TestCase):
+    def test_process_identity_uses_pointer_sized_handle_and_rejects_closed_windows(self):
+        from ctypes import wintypes
+        from app_agent.desktop import window_process_id
+        user32 = Mock()
+        def identity(handle, process):
+            self.assertEqual(handle, 0x100000001)
+            process._obj.value = 81
+            return 7
+        user32.GetWindowThreadProcessId.side_effect = identity
+        with patch("ctypes.WinDLL", return_value=user32, create=True):
+            self.assertEqual(window_process_id(0x100000001), 81)
+            user32.GetWindowThreadProcessId.side_effect = None
+            user32.GetWindowThreadProcessId.return_value = 0
+            with self.assertRaisesRegex(RuntimeError, "Window closed"):
+                window_process_id(0x100000001)
+        self.assertIs(user32.GetWindowThreadProcessId.argtypes[0], wintypes.HWND)
+
     def test_foreground_window_uses_user32_api_with_pointer_sized_result(self):
         from ctypes import wintypes
         user32 = Mock()

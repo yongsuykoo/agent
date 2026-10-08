@@ -8,6 +8,32 @@ from urllib.request import Request, build_opener
 from .research import NoRedirects, validate_api_key
 
 
+def synthetic_test_audio(path, phrase):
+    """Generate a fixed test utterance locally; never record the microphone."""
+    import sys
+    from pathlib import Path
+    if sys.platform != "win32":
+        raise RuntimeError("The automatic speech fixture requires Windows SAPI.")
+    from win32com.client import Dispatch
+    voice = Dispatch("SAPI.SpVoice")
+    stream = Dispatch("SAPI.SpFileStream")
+    stream.Format.Type = 22
+    stream.Open(str(Path(path)), 3, False)
+    try:
+        voice.AudioOutputStream = stream
+        voice.Speak(phrase)
+    finally:
+        stream.Close()
+        voice.AudioOutputStream = None
+    audio = Path(path).read_bytes()
+    if len(audio) > 4_000_000:
+        raise RuntimeError("Generated speech exceeds the test size limit.")
+    with wave.open(io.BytesIO(audio)) as wav:
+        if wav.getnframes() / wav.getframerate() > 60:
+            raise RuntimeError("Generated speech exceeds one minute.")
+    return audio
+
+
 class Recorder:
     def __init__(self):
         self.stream = None

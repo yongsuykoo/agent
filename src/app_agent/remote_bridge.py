@@ -32,8 +32,10 @@ def validate_job(value, allow_cloud, allow_tests, allow_tasks=False):
         if not allow_cloud or not allow_tasks:
             raise ValueError("Selected-window task permission was not enabled on Windows.")
         required = {"app_id", "generation", "window_handle", "process_id", "task", "expected_result"}
-        if set(parameters) != required:
+        if not required <= set(parameters) or set(parameters) - required - {"result_control_id"}:
             raise ValueError("A task requires the exact app version, window/process and expected result.")
+        if "result_control_id" in parameters and (not isinstance(parameters["result_control_id"], str) or not parameters["result_control_id"].strip() or len(parameters["result_control_id"]) > 500):
+            raise ValueError("Invalid result control identity.")
         for field in ("generation", "window_handle", "process_id"):
             if type(parameters[field]) is not int or parameters[field] <= 0:
                 raise ValueError("Invalid task identity.")
@@ -43,8 +45,10 @@ def validate_job(value, allow_cloud, allow_tests, allow_tasks=False):
     elif operation == "self_test":
         if not allow_tests:
             raise ValueError("Native test permission was not granted on Windows.")
-        if set(parameters) - {"with_cloud"} or type(parameters.get("with_cloud", False)) is not bool:
+        if set(parameters) - {"with_cloud", "with_voice"} or any(type(parameters.get(field, False)) is not bool for field in ("with_cloud", "with_voice")):
             raise ValueError("Invalid self-test parameters.")
+        if parameters.get("with_voice") and not parameters.get("with_cloud"):
+            raise ValueError("Speech testing requires cloud testing to be enabled.")
         if parameters.get("with_cloud") and not allow_cloud:
             raise ValueError("Cloud test permission was not granted on Windows.")
     elif operation == "study":
@@ -66,17 +70,25 @@ def execute_job(job, data_dir, cancel, emit, task_permission=None):
     # HTTP threads. There is no remote shell, arbitrary script or file path.
     from .catalog import Catalog
     from .discovery import scan_apps
-    from .desktop import WindowsDesktop
+    from .desktop import WindowsDesktop, window_process_id
     operation, parameters = job["operation"], job["parameters"]
     if cancel.is_set():
         raise RuntimeError("Connection session stopped.")
     if operation == "self_test":
         from .self_test import self_test
         from .research import CloudResearcher
-        return self_test(data_dir, CloudResearcher() if parameters.get("with_cloud") else None, emit, cancel)
+        return self_test(data_dir, CloudResearcher() if parameters.get("with_cloud") else None, emit, cancel,
+                         with_voice=parameters.get("with_voice", False))
     if operation == "windows":
-        return {"windows": [{"window_handle": handle, "title": title} for handle, title in WindowsDesktop.windows()
-                            if not title.startswith(("App Agent —", "App Agent connection"))]}
+        windows = []
+        for handle, title in WindowsDesktop.windows():
+            if title.startswith(("App Agent —", "App Agent connection")):
+                continue
+            try:
+                windows.append({"window_handle": handle, "title": title, "process_id": window_process_id(handle)})
+            except RuntimeError:
+                continue
+        return {"windows": windows}
     if operation == "inspect_window":
         snapshot = WindowsDesktop(parameters["window_handle"]).observe()
         if snapshot["process_id"] != parameters["process_id"]:
@@ -89,7 +101,15 @@ def execute_job(job, data_dir, cancel, emit, task_permission=None):
             return {"changes": changes, "apps": [{key: value for key, value in app.items() if key not in ("blueprint", "location")}
                                                  for app in catalog.apps()]}
         if operation == "learning_report":
-            return {"overview": catalog.learning_overview(), "campaign": catalog.setting("campaign_state", {})}
+            plans = []
+            for app in catalog.apps():
+                for capability in catalog.coverage(app["id"], app["generation"]):
+                    saved = catalog.practice_plan(app["id"], app["generation"], capability["name"])
+                    if saved and saved["status"] == "ready" and saved["body"] and len(plans) < 100:
+                        plans.append({"app_id": app["id"], "generation": app["generation"], "app": app["name"],
+                                      "plan": saved["body"], "status": "ready_unexecuted"})
+            return {"overview": catalog.learning_overview(), "campaign": catalog.setting("campaign_state", {}),
+                    "ready_experiments": plans}
         if operation == "study":
             from .campaign import study_campaign
             from .research import CloudResearcher
@@ -108,6 +128,11 @@ def execute_job(job, data_dir, cancel, emit, task_permission=None):
             observation = desktop.observe()
             if observation["process_id"] != parameters["process_id"]:
                 raise RuntimeError("Selected window changed process; no task executed.")
+            result_control = parameters.get("result_control_id")
+            if result_control and not any(control.get("automation_id") == result_control and control.get("visible")
+                                          and not control.get("password") and control.get("type") in ("Text", "Edit", "Document")
+                                          for control in observation["controls"]):
+                raise RuntimeError("Selected result control is unavailable; no task executed.")
             grant = task_permission(app, observation, parameters["task"], cancel)
             if grant is None or cancel.is_set():
                 raise RuntimeError("Local app-control permission was denied or cancelled.")
@@ -116,7 +141,7 @@ def execute_job(job, data_dir, cancel, emit, task_permission=None):
             result = TaskRunner(desktop, cloud, lambda action, snapshot: grants_action(grant, action, snapshot),
                                 emit, data_dir, cancel).run(parameters["task"], blueprint, max_steps=24,
                                 previous_workflows=catalog.workflows(app["id"], app["generation"]),
-                                required_result_text=parameters["expected_result"])
+                                required_result_text=parameters["expected_result"], result_control_id=result_control)
             catalog.save_workflow(app["id"], app["generation"], result)
             return result
         raise ValueError("Unsupported operation.")
@@ -227,7 +252,7 @@ def make_server(session, port=0):
                     result = session.get(self.path.rsplit("/", 1)[1])
                 elif self.command == "POST" and self.path == "/jobs":
                     result = session.enqueue(json.loads(body))
-                elif self.command == "POST" and self.path == "/stop" and not body:
+                elif self.command == "POST" and self.path == "/stop" and body in (b"", b"{}"):
                     session.stop()
                     result = {"stopped": True}
                 else:

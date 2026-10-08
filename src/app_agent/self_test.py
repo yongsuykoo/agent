@@ -174,7 +174,7 @@ def learning_experiment(fixture, cloud, run_dir, cancel, emit):
             "workspace": "A new disposable Notepad test document",
             "permitted_actions": ["Replace document text using the existing editable control"],
             "observed_controls": [{key: observed_editor.get(key) for key in
-                                   ("name", "type", "automation_id", "actions", "enabled", "visible")}],
+                                   ("name", "type", "class_name", "automation_id", "actions", "enabled", "visible")}],
             "required_task_form": "Replace the document text with exactly: <your own short test text>",
             "verification": "expected_result must be exactly your chosen document text; choose a documented text-entry operation",
             "forbidden_actions": ["Save", "Open another document", "Invoke menus", "Change settings"]}
@@ -184,10 +184,17 @@ def learning_experiment(fixture, cloud, run_dir, cancel, emit):
             if cancel.is_set():
                 raise RuntimeError("Self-test stopped.")
             emit("No documented experiment fits the observed editor scope; studying additional documentation once.")
-            additional = research_app(app["name"], app["version"], cloud,
-                focus={"practice_scope": context, "purpose": "Find documented workflows applicable to these observed controls"},
-                exclude_urls=[source["url"] for source in blueprint.get("sources", [])],
-                known_capabilities=[cap["name"] for cap in blueprint["capabilities"]])
+            options = {"focus": {"practice_scope": context, "purpose": "Find documented workflows applicable to these observed controls"},
+                       "known_capabilities": [cap["name"] for cap in blueprint["capabilities"]]}
+            if observed_editor.get("class_name") == "Edit" and "type" in observed_editor.get("actions", []):
+                # A positively identified native control has its own public
+                # technical reference; app-name searches can return a different
+                # app version's AI features instead of applicable primitives.
+                options["urls"] = ["https://learn.microsoft.com/en-us/windows/win32/controls/edit-controls",
+                                   "https://learn.microsoft.com/en-us/windows/win32/controls/about-edit-controls"]
+            else:
+                options["exclude_urls"] = [source["url"] for source in blueprint.get("sources", [])]
+            additional = research_app(app["name"], app["version"], cloud, **options)
             if cancel.is_set():
                 raise RuntimeError("Self-test stopped.")
             blueprint, _ = merge_blueprints(blueprint, additional)
@@ -223,7 +230,7 @@ def learning_experiment(fixture, cloud, run_dir, cancel, emit):
         catalog.close()
 
 
-def self_test(data_dir, cloud=None, emit=print, cancel=None):
+def self_test(data_dir, cloud=None, emit=print, cancel=None, with_voice=False):
     if sys.platform != "win32":
         raise RuntimeError("Live self-test needs an interactive Windows computer; cloud Linux cannot control your PC.")
     cancel = cancel or threading.Event()
@@ -267,6 +274,27 @@ def self_test(data_dir, cloud=None, emit=print, cancel=None):
             raise RuntimeError(f"Model-driven text task did not execute and verify the requested edit: {result['outcome']}.")
         return {"outcome": result["outcome"], "actions_executed": result["actions_executed"], "exact_match": True}
 
+    def voice_command():
+        if cloud is None:
+            raise SkipCheck("Speech transcription requires the locally enabled cloud credential.")
+        from .voice import synthetic_test_audio, transcribe
+        phrase = "Replace the document text with exactly: Voice command verified"
+        audio = synthetic_test_audio(run_dir / "voice-command.wav", phrase)
+        if cancel.is_set():
+            raise RuntimeError("Self-test stopped.")
+        transcript = transcribe(audio)
+        if not isinstance(transcript, str) or re.findall(r"\w+", transcript.casefold()) != re.findall(r"\w+", phrase.casefold()):
+            raise RuntimeError("Speech transcript differs from the known test utterance; no editor action executed.")
+        target = exact_text_goal(transcript)
+        if target is None or cancel.is_set():
+            raise RuntimeError("Speech command cannot be routed to the disposable editor; no action executed.")
+        fixture.replace("")
+        result = TaskRunner(fixture.desktop, cloud, fixture.approve, emit, run_dir, cancel).run(transcript, max_steps=8, effect_timeout=1)
+        if result["outcome"] != "result_observed" or result["actions_executed"] < 1 or editor(fixture.observe()).get("value") != target:
+            raise RuntimeError("Speech command did not execute and verify its exact editor output.")
+        return {"audio_source": "Windows SAPI synthetic utterance; microphone not tested", "transcript": transcript,
+                "exact_match": True, "actions_executed": result["actions_executed"], "outcome": result["outcome"]}
+
     def model_calculator():
         if cloud is None:
             raise SkipCheck("Cloud reasoning not requested or no API key available.")
@@ -301,6 +329,8 @@ def self_test(data_dir, cloud=None, emit=print, cancel=None):
               ("AI Notepad second distinct task", lambda: model_text("Autonomous replacement verified.")),
               ("AI Calculator task", model_calculator),
               ("AI documentation-to-practice learning", lambda: learning_experiment(fixture, cloud, run_dir, cancel, emit))]
+    if with_voice:
+        checks.append(("AI synthetic speech-to-editor command", voice_command))
     emit("Self-test uses a new disposable Notepad file and clears Calculator. Please leave the desktop untouched until it finishes. STOP cancels remaining checks.")
     report = run_checks(checks, run_dir / "report.json", cancel, emit)
     emit("Self-test complete. The disposable Notepad file and session evidence remain in " + str(run_dir))

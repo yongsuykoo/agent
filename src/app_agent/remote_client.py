@@ -38,6 +38,10 @@ class RemoteClient:
         if method not in ("GET", "POST") or not re.fullmatch(r"/(?:info|jobs|stop|jobs/[a-f0-9]{32})", path):
             raise ValueError("Unsupported controller request.")
         body = b"" if value is None else canonical(value)
+        if method == "POST" and path == "/stop" and value is None:
+            # Some relay paths reject an empty POST before authenticated route
+            # handling. A signed empty JSON object preserves the fixed command.
+            body = canonical({})
         if method == "GET" and body:
             raise ValueError("GET requests accept no body.")
         headers = sign_request(self.keys, method, path, body)

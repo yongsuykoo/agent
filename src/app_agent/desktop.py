@@ -88,6 +88,20 @@ def text_actions(control, item):
         item["actions"].append("type")
 
 
+def window_process_id(handle):
+    """Read the native process identity without inspecting window contents."""
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    function = user32.GetWindowThreadProcessId
+    function.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    function.restype = wintypes.DWORD
+    process = wintypes.DWORD()
+    if not function(handle, ctypes.byref(process)) or not process.value:
+        raise RuntimeError("Window closed or its process identity is unavailable.")
+    return process.value
+
+
 class WindowsDesktop:
     def __init__(self, handle):
         if sys.platform != "win32":
@@ -125,6 +139,7 @@ class WindowsDesktop:
                 info = control.element_info
                 item = {"id": index, "name": info.name[:500], "type": info.control_type,
                                "automation_id": info.automation_id,
+                               "class_name": str(getattr(info, "class_name", ""))[:200],
                                "enabled": control.is_enabled(), "visible": control.is_visible(),
                                "actions": [], "value": "", "password": False, "state": {}}
                 try:
