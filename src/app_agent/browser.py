@@ -43,6 +43,23 @@ def executable():
     raise RuntimeError('A supported Edge or Chrome browser executable was not found.')
 
 
+def read_endpoint(path,process,guard,timeout=15):
+    """Wait for a complete owned endpoint, including Windows sharing delays."""
+    deadline=time.monotonic()+timeout
+    while True:
+        guard()
+        if process.poll() is not None:raise RuntimeError('Managed browser exited before startup; inspect the installed browser and sandbox configuration.')
+        try:
+            with path.open('rb') as stream:data=stream.read(4097)
+            lines=data.decode('ascii').splitlines()
+            if len(data)<=4096 and len(lines)==2 and re.fullmatch(r'[0-9]{1,5}',lines[0]) and re.fullmatch(r'/devtools/browser/[A-Za-z0-9-]{1,128}',lines[1]):
+                port=int(lines[0])
+                if 1<=port<=65535:return port,lines[1]
+        except (FileNotFoundError,PermissionError,UnicodeError):pass
+        if time.monotonic()>deadline:raise TimeoutError('Managed browser startup timed out waiting for its complete endpoint.')
+        time.sleep(.05)
+
+
 class Browser:
     def __init__(self,guard=lambda:None,*,headless=False,check_url=public_https,fixture_no_sandbox=False,session=None,manual_login=False):
         if fixture_no_sandbox and (sys.platform=='win32' or check_url is public_https):
@@ -60,7 +77,10 @@ class Browser:
             parsed=urlsplit(proxy)
             if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password:raise ValueError('Browser proxy configuration is unsupported.')
         self.profile=tempfile.TemporaryDirectory(prefix='app-agent-browser-')
-        root=Path(self.profile.name);self.log=(root/'browser.log').open('wb')
+        root=Path(self.profile.name)
+        # Windows browser children can retain inherited log handles after the
+        # parent exits. Never tie those handles to a disposable profile folder.
+        self.log=(root/'browser.log').open('wb') if sys.platform!='win32' else None
         profile=self.session.profile if self.session else root/'profile'
         args=[binary,'--user-data-dir='+str(profile),'--remote-debugging-port=0','--remote-debugging-address=127.0.0.1','--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-background-mode','--window-size=1280,720','about:blank']
         if self.headless:args.insert(1,'--headless=new')
@@ -76,16 +96,10 @@ class Browser:
                 # A retained profile may have a port file from an earlier process.
                 from .file_tools import safe_path
                 safe_path(profile/'DevToolsActivePort').unlink(missing_ok=True)
-            self.process=subprocess.Popen(args,stdout=self.log,stderr=self.log,env=env)
-            deadline=time.monotonic()+15;active=profile/'DevToolsActivePort'
-            while not active.exists():
-                self.guard()
-                if self.process.poll() is not None:raise RuntimeError('Managed browser exited before startup; inspect the installed browser and sandbox configuration.')
-                if time.monotonic()>deadline:raise TimeoutError('Managed browser startup timed out.')
-                time.sleep(.05)
-            lines=active.read_text().splitlines();port=int(lines[0])
-            if not 1<=port<=65535 or len(lines)!=2:raise ValueError('Invalid agent-owned browser endpoint.')
-            self.transport=DevTools('ws://127.0.0.1:'+str(port)+lines[1],port,self.guard)
+            output=self.log if self.log is not None else subprocess.DEVNULL
+            self.process=subprocess.Popen(args,stdout=output,stderr=output,env=env)
+            port,endpoint=read_endpoint(profile/'DevToolsActivePort',self.process,self.guard)
+            self.transport=DevTools('ws://127.0.0.1:'+str(port)+endpoint,port,self.guard)
             self.info=self.transport.call('Browser.getVersion',browser=True)
             self.transport.call('Browser.setDownloadBehavior',{'behavior':'deny'},browser=True)
             self.target=self.transport.call('Target.createTarget',{'url':'about:blank'},browser=True)['targetId']
@@ -177,7 +191,12 @@ class Browser:
                 self.process.terminate()
                 try:self.process.wait(timeout=3)
                 except subprocess.TimeoutExpired:self.process.kill();self.process.wait(timeout=3)
-        if hasattr(self,'log'):self.log.close()
+        if getattr(self,'log',None) is not None:self.log.close()
         if self.session and (not self.process or self.process.poll() is not None):self.session.close()
         if self.profile:
-            self.profile.cleanup();self.profile=None
+            deadline=time.monotonic()+3
+            while True:
+                try:self.profile.cleanup();self.profile=None;break
+                except PermissionError:
+                    if time.monotonic()>deadline:raise
+                    time.sleep(.05)

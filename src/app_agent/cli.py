@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import sqlite3
+import sys
 from pathlib import Path
 from .machine import scan_machine, machine_report
 from .discovery import installed_apps, scan_apps
@@ -11,7 +12,16 @@ from .knowledge import KnowledgeStore
 from .research import CloudResearcher, research_app
 
 
+def prepare_output():
+    # Windows pipes and older consoles may otherwise fail an entire Unicode
+    # task while printing its verified result (the saved evidence is UTF-8).
+    for stream in (sys.stdout,sys.stderr):
+        configure=getattr(stream,'reconfigure',None)
+        if callable(configure):configure(encoding='utf-8',errors='backslashreplace')
+
+
 def main():
+    prepare_output()
     parser = argparse.ArgumentParser(description="Application agent foundation")
     parser.add_argument("--data-dir", type=Path, default=Path(os.getenv("LOCALAPPDATA", str(Path.home()))) / "AppAgent")
     commands = parser.add_subparsers(dest="command", required=True)
