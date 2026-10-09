@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime,timezone
 from .jobs import process_alive
 from .learning import merge_blueprints
-from .pdf_documents import installed_pdf,progress_key,put_state,acknowledge_sources,READER_REVISION
+from .pdf_documents import installed_pdf,progress_key,put_state,acknowledge_sources,READER_REVISION,all_manuals
 
 
 def available(state,stamp):
@@ -31,7 +31,7 @@ def pending_manuals(catalog):
         # Initial research owns this generation until its lease completes.
         if not app.get('blueprint') and app['status']=='researching':continue
         evidence=catalog.local_evidence(app['id'],app['generation']) or {}
-        for manual in evidence.get('manuals',[]):
+        for manual in all_manuals(catalog,app,evidence):
             if manual.get('format')!='pdf':continue
             state=catalog.setting(progress_key(app,manual),{})
             if available(state,stamp):pending.append((app,manual,evidence,state))
@@ -64,7 +64,7 @@ def release(catalog,key,token,error=None,app=None):
             if error is not None and app is not None:
                 # Unreadable manuals must not strand an app: normal research
                 # can now look for other installed/public documentation.
-                manuals=(catalog.local_evidence(app['id'],app['generation']) or {}).get('manuals',[])
+                manuals=all_manuals(catalog,app,catalog.local_evidence(app['id'],app['generation']) or {})
                 owners=[catalog.setting(progress_key(app,item),{}).get('lease',{}) for item in manuals if item.get('format')=='pdf']
                 if not any(owner.get('until',0)>time.time() and process_alive(owner.get('pid')) for owner in owners):
                     catalog.db.execute("UPDATE apps SET status='queued' WHERE id=? AND generation=? AND present=1 AND blueprint IS NULL AND status='manual_reading'",(app['id'],app['generation']))
@@ -90,7 +90,7 @@ def commit(catalog,app,manual,token,source,additional,cancel=None):
             catalog.db.execute('DELETE FROM settings WHERE key=?',(draft_key(app),))
         else:
             put_state(catalog,draft_key(app),combined)
-            manuals=(catalog.local_evidence(app['id'],app['generation']) or {}).get('manuals',[])
+            manuals=all_manuals(catalog,app,catalog.local_evidence(app['id'],app['generation']) or {})
             more=any(not catalog.setting(progress_key(app,item),{}).get('complete') for item in manuals if item.get('format')=='pdf')
             catalog.db.execute('UPDATE apps SET status=?,error=NULL,retry_at=NULL WHERE id=? AND generation=? AND present=1',
                 ('manual_reading' if more else 'queued',app['id'],app['generation']))
@@ -111,7 +111,7 @@ def continue_manual(catalog,cloud,emit,daily_limit=0,cancel=None):
     if token is None:return {'status':'manual_busy'}
     failure=None
     try:
-        document=installed_pdf(catalog,app,evidence,manual)
+        document=read_manual(catalog,app,evidence,manual)
         if cancelled():return {'status':'cancelled'}
         emit(f"Continuing {app['name']} manual at page {document['read_cursor']['page']}, character {document['read_cursor']['offset']}.")
         if document['text']:
@@ -128,11 +128,11 @@ def continue_manual(catalog,cloud,emit,daily_limit=0,cancel=None):
         except KeyError:return {'status':'app_changed'}
         if current['generation']!=app['generation']:return {'status':'app_changed'}
         # A manual can change while a provider request is in flight.
-        checked=installed_pdf(catalog,app,evidence,manual)
+        checked=read_manual(catalog,app,evidence,manual)
         if checked['read_cursor']!=document['read_cursor']:return {'status':'manual_checkpoint_changed'}
         source={key:value for key,value in document.items() if key!='text'}
         additional={'name':app['name'],'version':app.get('version',''),'sources':[source],**extracted,
-            'evidence_origin':'installed_manuals','updated_at':datetime.now(timezone.utc).isoformat()}
+            'evidence_origin':'public_manuals' if manual.get('origin')=='public' else 'installed_manuals','updated_at':datetime.now(timezone.utc).isoformat()}
         if cancelled():return {'status':'cancelled'}
         result=commit(catalog,app,manual,token,source,additional,cancel)
         if result is None:return {'status':'cancelled' if cancelled() else 'manual_checkpoint_changed'}
@@ -147,13 +147,21 @@ def continue_manual(catalog,cloud,emit,daily_limit=0,cancel=None):
 
 def manual_report(catalog,app,evidence):
     result=[]
-    for manual in evidence.get('manuals',[]):
+    for manual in all_manuals(catalog,app,evidence):
         if manual.get('format')!='pdf':continue
         state=catalog.setting(progress_key(app,manual),{})
         result.append({'manual':manual['path'],'reader_revision':READER_REVISION,
+            'origin':manual.get('origin','installed'),
             'blueprint_ready':bool(app.get('blueprint')),
             'reading_complete':bool(state.get('complete')),'next_cursor':state.get('cursor',{'page':1,'offset':0}),
             'reviewed_chunks':state.get('reviewed_chunks',0),'characters_reviewed':state.get('characters_reviewed',0),
             'page_count':state.get('page_count'),'no_text_pages':state.get('no_text_pages',[]),
             'deferred':state.get('retry_at',0)>time.time()})
     return result
+
+
+def read_manual(catalog,app,evidence,manual):
+    if manual.get('origin')=='public':
+        from .public_manuals import read_pdf
+        return read_pdf(catalog,app,manual)
+    return installed_pdf(catalog,app,evidence,manual)

@@ -10,7 +10,7 @@ Only one worker can claim a manual section. A live owner's lease prevents duplic
 
 Blank or scanned sections are recorded as textless page gaps and do not consume a model request; later extractable sections remain eligible. Extractable sections containing no applicable operations can advance with explicit limitations and no invented capabilities. Machine reports expose reviewed sections, characters, next cursor, known textless pages and reading completion. These fields measure retained reading evidence, not complete understanding.
 
-Continuation applies to discovered installed PDFs, including new apps with no blueprint. Draft findings are retained separately until a cited operating procedure is established. Exhausted manuals without procedures queue alternative research. Installation scanning and public documentation retrieval retain their existing behavior. Public PDFs still receive a single bounded extraction. OCR, oversized/encrypted manuals, exhaustive source-code understanding and automatic execution of arbitrary software remain outside verified coverage.
+Continuation applies to discovered installed PDFs, including new apps with no blueprint. Draft findings are retained separately until a cited operating procedure is established. Exhausted manuals without procedures queue alternative research. Installation scanning and public documentation retrieval retain their existing behavior. Catalog-backed public PDFs now resume through their retained snapshots; see ONLINE_MANUALS.md. Ad hoc research retains a single bounded extraction. OCR, oversized/encrypted manuals, exhaustive source-code understanding and automatic execution of arbitrary software remain outside verified coverage.
 
 Automatic checks use owned PDFs and installation folders, the actual isolated parser, filesystem, SQLite and process APIs, and deterministic provider responses:
 
@@ -19,4 +19,4 @@ python -m unittest discover -s tests -v
 python -m app_agent.cli document-smoke
 ```
 
-The fourteen document checks include restart through seventy pages, contiguous offsets through a 50,010-character page, blank/scanned sections without model usage, cancelled commits, concurrent claims, actual process-exit recovery and generation changes. `windows\TestDocuments.cmd` runs them unattended. Hosted CI also runs existing Windows browser and file checks; no personal desktop or provider key is needed.
+The sixteen document checks include restart through seventy pages, contiguous offsets through a 50,010-character page, blank/scanned sections without model usage, cancelled commits, concurrent claims, actual process-exit recovery and generation changes. `windows\TestDocuments.cmd` runs them unattended. Hosted CI also runs existing Windows browser and file checks; no personal desktop or provider key is needed.

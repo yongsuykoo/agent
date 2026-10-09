@@ -58,7 +58,13 @@ def study_campaign(catalog, cloud, emit, daily_limit=50, max_apps=5, max_plans=3
         status='cancelled' if preview['status']=='cancelled' else 'cloud_blocked'
     else:
         from .manual_study import continue_manual
-        manual=continue_manual(catalog,cloud,emit,daily_limit,cancel) if max_apps-int(attempted)>0 else {'status':'no_pending_manual'}
+        from .public_manuals import refresh_next
+        # Refresh has no model request and must not wait for a large manual
+        # queue to empty. One source check and one section can progress together.
+        refreshed=refresh_next(catalog,emit,cancel) if max_apps else {'status':'no_public_refresh'}
+        if refreshed['status'] not in ('no_public_refresh','public_refresh_busy'):research.append(refreshed)
+        manual=({'status':'cancelled'} if refreshed['status']=='cancelled' else
+            continue_manual(catalog,cloud,emit,daily_limit,cancel) if max_apps-int(attempted)>0 else {'status':'no_pending_manual'})
         continued=manual['status'] not in ('no_pending_manual','manual_busy')
         if continued:research.append(manual)
         if manual['status'] in ('cancelled','cloud_blocked','daily_limit'):status=manual['status']

@@ -87,7 +87,7 @@ class PageText(HTMLParser):
             self.parts.append(data.strip())
 
 
-def fetch_document(url):
+def fetch_document(url,pdf_capture=None):
     public_https(url)
     request = Request(url, headers={"User-Agent": "AppAgent/0.1 (documentation research)"})
     try:
@@ -101,8 +101,10 @@ def fetch_document(url):
             if len(raw) > limit:
                 raise ValueError(f"Documentation exceeds its {limit//1_000_000} MB retrieval limit.")
             if content_type=='application/pdf':
-                return {'url':response.url,'requested_url':url,'sha256':hashlib.sha256(raw).hexdigest(),
-                    'retrieved_at':datetime.now(timezone.utc).isoformat(),**extract_pdf(raw)}
+                metadata={'url':response.url,'requested_url':url,'sha256':hashlib.sha256(raw).hexdigest(),
+                    'retrieved_at':datetime.now(timezone.utc).isoformat()}
+                if pdf_capture is not None:return pdf_capture(raw,metadata)
+                return {**metadata,**extract_pdf(raw)}
             text = raw.decode(response.headers.get_content_charset() or "utf-8", errors="replace")
             if content_type == "text/html":
                 parser = PageText()
@@ -291,7 +293,7 @@ def validate_extraction(result, documents,allow_empty=False):
     return {"capabilities": capabilities, "limitations": limitations}
 
 
-def research_app(name, version, researcher, urls=None, fetcher=fetch_document, focus=None, exclude_urls=None, known_capabilities=None, local_documents=None):
+def research_app(name, version, researcher, urls=None, fetcher=None, focus=None, exclude_urls=None, known_capabilities=None, local_documents=None, public_capture=None):
     if not name.strip():
         raise ValueError("Application name must not be empty.")
     local_failure = None
@@ -315,7 +317,7 @@ def research_app(name, version, researcher, urls=None, fetcher=fetch_document, f
     def retrieve(url):
         try:
             with DOCUMENT_SLOTS:
-                return fetcher(url), None
+                return (fetcher(url) if fetcher else fetch_document(url,pdf_capture=public_capture)), None
         except (ValueError, RuntimeError, OSError) as error:
             return None, str(error)
     # Preserve citation indices in source order regardless of completion order.
@@ -323,6 +325,12 @@ def research_app(name, version, researcher, urls=None, fetcher=fetch_document, f
         for document, error in pool.map(retrieve, sources):
             if document is not None:documents.append(document)
             if error is not None:failures.append(error)
+    deferred=[doc for doc in documents if doc.get('deferred_pdf')]
+    documents=[doc for doc in documents if not doc.get('deferred_pdf')]
+    if not documents and deferred:
+        return {'name':name.strip(),'version':version,'sources':[],'capabilities':[],
+            'limitations':['Public PDFs are queued for bounded section study; discovery alone establishes no operating procedure.'],
+            'public_pdf_pending':True,'retrieval_failures':failures}
     if not documents:
         raise RuntimeError("No documentation could be retrieved. " + " ".join(failures))
     extracted = (researcher.extract(name, version, documents, known_capabilities=known_capabilities)

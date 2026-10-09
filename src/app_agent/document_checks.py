@@ -194,6 +194,8 @@ def document_smoke(directory,emit=print,cancel=None):
         ('Full installed manual resumes after restart',continuation),('Long PDF page retains every character range',long_page),
         ('Empty sections retain gaps and continue without model calls',empty_section),('Cancelled concurrent and updated manual checkpoints are fenced',fences),
         ('New app studies beyond front matter before its first blueprint',bootstrap),('Exhausted manual queues alternative research without inventing operations',no_operation)]
+    from .public_manual_checks import checks as online_checks
+    checks.extend(online_checks(root))
     emit('Document tests use owned PDF fixtures only; no provider key, network or desktop interaction.')
     return run_checks(checks,root/'report.json',cancel,emit,
         scope='Bounded owned PDF/manual learning checks. Documented operations remain execution-unverified; no all-app certification.')

@@ -25,12 +25,20 @@ def ensure_blueprint(catalog, app, cloud, emit, cancel=None, claimed=False):
     emit(f"Studying {app['name']} {app.get('version', '')}: finding documentation and operational procedures.")
     # Search independently: do not assume a registry HelpLink is current/trusted.
     from .machine import installed_research_options
+    from .public_manuals import PublicCapture,exhausted_urls
     options = installed_research_options(catalog, app)
-    blueprint = research_app(app["name"], app.get("version", ""), cloud, **options)
+    capture=PublicCapture(app)
+    try:
+        blueprint = research_app(app["name"], app.get("version", ""), cloud, public_capture=capture,exclude_urls=exhausted_urls(catalog,app) or None, **options)
+    finally:capture.register(catalog,cancel)
     if options:
         blueprint['installed_evidence'] = options['focus']['observed_installation']
     if cancel is not None and cancel.is_set():
         raise RuntimeError("Research cancelled; no new blueprint saved.")
+    if catalog.get(app['id'])['generation']!=app['generation']:
+        raise RuntimeError('App changed during research; old-version sources discarded.')
+    if blueprint.get('public_pdf_pending'):
+        raise ResearchBusy('Public PDF sources are queued for automatic section study; discovery alone is not an operational blueprint.')
     if not catalog.save_blueprint(app["id"], app["generation"], blueprint):
         raise RuntimeError("App changed during research; old-version blueprint discarded.")
     catalog.set_setting(f"documentation:{app['id']}:{app['generation']}",
@@ -60,6 +68,8 @@ def learn_next(catalog, cloud, emit, limit=3, cancel=None):
     try:
         blueprint = ensure_blueprint(catalog, app, cloud, emit, cancel, claimed=True)
         return {"status": "documented", "app": app["name"], "capabilities": len(blueprint["capabilities"]), "used": budget["used"]}
+    except ResearchBusy as error:
+        return {'status':'manual_sources_discovered','app':app['name'],'detail':str(error)}
     except Exception as error:
         catalog.fail_research(app["id"], app["generation"], error)
         emit(f"Research paused for {app['name']}: {error}")
@@ -130,7 +140,7 @@ def merge_blueprints(previous, additional):
         else:
             capabilities[key] = dict(cap)
             added += 1
-    def source_key(source):return (source['url'],source.get('sha256'),source.get('reader_revision'),json_key(source.get('read_cursor')))
+    def source_key(source):return (source['url'],source.get('sha256'),source.get('reader_revision'),json_key(source.get('read_cursor')),source.get('manual_identity'))
     sources = {source_key(source): source for source in previous.get("sources", [])}
     sources.update({source_key(source): source for source in additional.get("sources", [])})
     return {**previous, **additional, "capabilities": list(capabilities.values()), "sources": list(sources.values()),
@@ -171,14 +181,19 @@ def deepen_next(catalog, cloud, emit, limit=50, cancel=None):
     rounds = state.get("rounds", 1) + 1
     emit(f"Deepening study of {app['name']}: seeking additional user/technical manuals and missing operations.")
     try:
+        from .public_manuals import PublicCapture,exhausted_urls
+        capture=PublicCapture(app)
         old = app["blueprint"]
         names = [cap["name"] for cap in old["capabilities"]]
-        additional = research_app(app["name"], app.get("version", ""), cloud,
-            focus={"documented_operations": names[:200], "known_gaps": old.get("limitations", [])[:20],
-                   "topics": ["advanced workflows", "automation/API/CLI documentation", "failure diagnosis and recovery"]},
-            exclude_urls=[source["url"] for source in old.get("sources", [])], known_capabilities=names)
+        try:
+            additional = research_app(app["name"], app.get("version", ""), cloud,
+                focus={"documented_operations": names[:200], "known_gaps": old.get("limitations", [])[:20],
+                       "topics": ["advanced workflows", "automation/API/CLI documentation", "failure diagnosis and recovery"]},
+                exclude_urls=list(dict.fromkeys([source["url"] for source in old.get("sources", [])]+exhausted_urls(catalog,app))), known_capabilities=names,public_capture=capture)
+        finally:capture.register(catalog,cancel)
         if cancel is not None and cancel.is_set():
             return {"status": "cancelled"}
+        if additional.get('public_pdf_pending'):return {'status':'manual_sources_discovered','app':app['name']}
         combined, added = merge_blueprints(old, additional)
         if not catalog.save_blueprint(app["id"], app["generation"], combined):
             return {"status": "app_changed"}

@@ -52,6 +52,7 @@ def extract_pdf(raw,cursor=None,allow_empty=False):
 
 def manual_identity(app,manual):
     fields=[app['id'],app['generation'],manual['sha256'],manual['path'],manual.get('root'),READER_REVISION]
+    if manual.get('origin')=='public':fields.extend(['public',manual['url'],manual['requested_url']])
     return hashlib.sha256(json.dumps(fields,separators=(',',':')).encode()).hexdigest()
 
 
@@ -66,6 +67,11 @@ def put_state(catalog,key,value):
     catalog.db.execute('INSERT INTO settings VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,json.dumps(value)))
 
 
+def all_manuals(catalog,app,evidence):
+    from .public_manuals import manuals
+    return evidence.get('manuals',[])+manuals(catalog,app)
+
+
 def acknowledge_sources(catalog,app,sources):
     """Advance only locally cached, exact current-generation PDF evidence.
 
@@ -73,12 +79,13 @@ def acknowledge_sources(catalog,app,sources):
     a manual, a failed provider response or a stale source cannot move the cursor.
     """
     evidence=catalog.local_evidence(app['id'],app['generation']) or {};advanced=0
-    for manual in evidence.get('manuals',[]):
+    for manual in all_manuals(catalog,app,evidence):
         if manual.get('format')!='pdf':continue
         identity=manual_identity(app,manual);key=progress_key(app,manual)
         for source in sources:
             if not isinstance(source,dict) or source.get('manual_identity')!=identity or source.get('sha256')!=manual['sha256']:continue
-            if source.get('url')!='installation-manual:'+manual['sha256']+'/'+manual['path']:continue
+            url=manual['url'] if manual.get('origin')=='public' else 'installation-manual:'+manual['sha256']+'/'+manual['path']
+            if source.get('url')!=url:continue
             state=catalog.setting(key,{})
             cursor=state.get('cursor',{'page':1,'offset':0})
             if state.get('complete') or source.get('read_cursor')!=cursor:continue

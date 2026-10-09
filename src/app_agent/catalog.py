@@ -27,6 +27,8 @@ class Catalog:
         CREATE TABLE IF NOT EXISTS scans (time TEXT NOT NULL, report TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS local_evidence (app_id TEXT NOT NULL, generation INTEGER NOT NULL,
           body TEXT NOT NULL, observed TEXT NOT NULL, PRIMARY KEY(app_id,generation));
+        CREATE TABLE IF NOT EXISTS public_manuals (app_id TEXT NOT NULL, generation INTEGER NOT NULL,
+          requested_url TEXT NOT NULL, body TEXT NOT NULL, raw BLOB NOT NULL, PRIMARY KEY(app_id,generation,requested_url));
         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS knowledge_nodes (id TEXT PRIMARY KEY, kind TEXT NOT NULL, label TEXT NOT NULL,
           search_text TEXT NOT NULL, app_id TEXT, generation INTEGER, level TEXT NOT NULL, body TEXT NOT NULL);
@@ -127,6 +129,7 @@ class Catalog:
                 if row["id"] not in seen and app["source"] in complete:
                     self.db.execute("UPDATE apps SET present=0,status='removed',updated=? WHERE id=?", (timestamp, row["id"]))
                     changed["removed"].append(app["name"])
+            self.db.execute('DELETE FROM public_manuals WHERE EXISTS (SELECT 1 FROM apps a WHERE a.id=public_manuals.app_id AND (a.generation!=public_manuals.generation OR a.present=0))')
             for identity, body in snapshot.get('local_evidence', {}).items():
                 current = self.db.execute("SELECT generation FROM apps WHERE id=? AND present=1", (identity,)).fetchone()
                 if current:
