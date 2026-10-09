@@ -39,7 +39,7 @@ def launch(data_dir):
 
 def _launch(data_dir):
     root = tk.Tk()
-    root.title("Personal App Agent — 0.14.0")
+    root.title("Personal App Agent — 0.15.0")
     root.geometry("980x820")
     if not (os.getenv('AGENT_API_KEY') or os.getenv('OPENAI_API_KEY')):
         from .local_credentials import load_key
@@ -403,10 +403,12 @@ def _launch(data_dir):
         if mode not in ("observe", "research", "practice") and not task:
             return
         from .file_tools import file_request
+        from .browser import browser_request
         local_files=mode=='run' and handle is None and file_request(task) is not None
+        browser_goal=mode=='run' and handle is None and browser_request(task) is not None
         if mode in ("run", "diagnose", "practice") and not local_files and not autonomous_tasks.get() and not messagebox.askokcancel("Cloud data sharing", "The task, installed app names used to choose an app, and selected-window control text will be sent to OpenAI. Automatic mode may open the chosen installed app. Avoid sensitive windows. Continue?"):
             return
-        use_vision = not local_files and vision.get() and mode in ("run", "practice")
+        use_vision = not local_files and not browser_goal and vision.get() and mode in ("run", "practice")
         if use_vision and not autonomous_tasks.get() and not messagebox.askokcancel("Screenshot sharing", "Send images of the selected app window to OpenAI for this task? Images can include visible sensitive information and overlapping windows. Avoid confidential data. Coordinate clicks require your task/step authorization."):
             return
         saved_job_id = None
@@ -437,7 +439,7 @@ def _launch(data_dir):
             app = None
             try:
                 apps = catalog.apps()
-                if not apps and not local_files:
+                if not apps and not local_files and not browser_goal:
                     scan_machine(catalog, scanner=scan_apps, desktop=WindowsDesktop)
                     apps = catalog.apps()
                 if mode == 'run':

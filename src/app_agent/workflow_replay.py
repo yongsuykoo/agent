@@ -4,10 +4,12 @@ import time
 
 
 def guard(observation):
-    return sorted([c.get('automation_id', ''), c['type'], c['name'], c.get('value', ''),
+    rows=sorted([c.get('automation_id', ''), c['type'], c['name'], c.get('value', ''),
                    bool(c['enabled']), bool(c['visible']), bool(c.get('password')),
-                   json.dumps(c.get('state', {}), sort_keys=True)]
+                   json.dumps({**c.get('state', {}),**({'href':c['href']} if c.get('href') else {})}, sort_keys=True)]
                   for c in observation['controls'] if c['id'] != 0)
+    if observation.get('url'):rows.append(['page:url',observation['url']])
+    return rows
 
 
 def compile_recipe(record, result_control_id=None):

@@ -1,5 +1,7 @@
 # Persistent Windows goals
 
+Version 0.15.0 includes [isolated browser goals](BROWSER_TASKS.md). Each browser action is journaled before dispatch. Interrupted unverified actions retain `needs_review`; a verified restart checks the saved observation's integrity and keeps the historical result without reopening the site. Historical evidence does not certify the website's current state. Exact repeats submitted as new goals can reuse a verified recipe only after checking the installed browser revision and live URL/control/content guards.
+
 Chat and transcribed voice tasks now enter a local persistent queue. The agent saves the original goal, task permissions, selected window/process when supplied, app-version plan, verified outputs, action journal and recovery state. Closing and reopening the standalone agent retains this work.
 
 The design follows the persistent goals and executor separation discussed in the [Grok Bot overview](https://docs.x.ai/grok-bot/overview), [Meta Muse design](https://introducing.muse.ai/) and [OpenAI Dots announcement](https://openai.com/index/introducing-dots/). This release implements local job ownership; it does not embed those products or reproduce their infrastructure.

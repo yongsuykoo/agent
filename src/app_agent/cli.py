@@ -22,6 +22,8 @@ def main():
     commands.add_parser("doctor", help="Check runtime prerequisites without revealing credentials")
     commands.add_parser("windows-smoke", help="Open Calculator and test three calculations; clears its current calculation")
     commands.add_parser('file-smoke',help='Automatically test disposable file/folder copies and ZIP verification; no desktop or API key needed')
+    browser=commands.add_parser('browser-smoke',help='Test eight isolated real-browser workflows with disposable local fixtures; no API key needed')
+    browser.add_argument('--trusted-fixture-no-sandbox',action='store_true',help='Linux built-in fixture testing only; forbidden on Windows and real browsing')
     automatic = commands.add_parser("self-test", help="Automatically test Windows inventory, Calculator and disposable Notepad; save a report")
     automatic.add_argument("--with-cloud", action="store_true", help="Also run AI tasks; prompts securely for a missing API key")
     automatic.add_argument("--with-office", action="store_true", help="Also create and verify fresh Excel/Word test files when installed; no cloud calls")
@@ -71,6 +73,12 @@ def main():
     research.add_argument("--source", action="append", help="Optional documentation HTTPS URL; repeat up to five times")
     args = parser.parse_args()
     try:
+        if args.command=='browser-smoke':
+            from .browser_checks import browser_smoke
+            result=browser_smoke(args.data_dir,fixture_no_sandbox=args.trusted_fixture_no_sandbox)
+            print(json.dumps(result,indent=2))
+            if result['status']!='passed':parser.exit(1,'Browser checks failed or were cancelled. Read the saved report.\n')
+            return
         if args.command=='file-smoke':
             from .file_checks import file_smoke
             result=file_smoke(args.data_dir)

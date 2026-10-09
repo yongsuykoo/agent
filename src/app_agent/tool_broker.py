@@ -29,6 +29,9 @@ def choose_tool(task,apps,selected_app=None):
     from .file_tools import file_request
     request=file_request(task)
     if request and selected_app is None:return {'kind':'files','request':request}
+    from .browser import browser_request
+    request=browser_request(task)
+    if request and selected_app is None:return {'kind':'browser','request':request}
     # A creation tool must not silently omit the rest of a compound goal.
     if re.search(r'\b(?:email|send|upload|publish|print|delete|attach|import|open|existing|replace|edit|modify|update|macro|image|photo|pivot)\b|[A-Za-z]:[\\/]|https?://',task,re.I):
         return {'kind':'desktop'}

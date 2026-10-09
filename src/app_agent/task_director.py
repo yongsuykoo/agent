@@ -134,6 +134,9 @@ class TaskDirector:
     def run(self, task, use_vision=False):
         from .tool_broker import choose_tool
         route=choose_tool(task,self.catalog.apps(),self.selected_app)
+        if route['kind']=='browser':
+            from .browser_tasks import run_browser
+            return run_browser(self,task,route['request'])
         if route['kind']=='files':
             from .file_tasks import run_files
             return run_files(self,task,route['request'])

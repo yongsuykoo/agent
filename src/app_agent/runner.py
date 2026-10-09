@@ -82,7 +82,7 @@ def reconcile_action(action, before, after):
     """Remap a stable target; reject changed data or ambiguous controls."""
     if before["window"] != after["window"]:
         return None
-    for field in ("window_handle", "process_id"):
+    for field in ("window_handle", "process_id", "url"):
         if before.get(field) is not None and before[field] != after.get(field):
             return None
     if action["kind"] == "click_point":
@@ -116,6 +116,9 @@ def observed_results(observation, result_control_id=None):
 
 
 def result_matches(observation, expected_text, exact_goal=None, result_control_id=None):
+    if result_control_id=='page:output':
+        return any(c.get('automation_id')=='page:output' and c.get('visible') and not c.get('password')
+                   and not c.get('state',{}).get('truncated') and c.get('name')==expected_text for c in observation['controls'])
     if exact_goal is not None:
         return any(c.get('value') == exact_goal for c in observation['controls']
                    if c['visible'] and not c.get('password') and c['type'] in ('Edit', 'Document'))
