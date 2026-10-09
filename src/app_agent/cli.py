@@ -31,6 +31,20 @@ def main():
     query.add_argument("task")
     commands.add_parser("apps", help="List discovered apps and documentation status")
     commands.add_parser('jobs', help='Show saved goals, progress and recovery states locally')
+    resident=commands.add_parser('worker',help='Run authorized saved goals and schedules in this Windows session without the GUI')
+    resident.add_argument('--once',action='store_true',help='Run one supervisor cycle then exit')
+    commands.add_parser('worker-status',help='Show local background worker state without revealing tasks or credentials')
+    commands.add_parser('enable-startup',help='Start the local background worker when this Windows account logs in')
+    commands.add_parser('disable-startup',help='Remove this agent current-account login startup')
+    commands.add_parser('remember-key',help='Prompt locally and encrypt a provider key for this Windows account')
+    commands.add_parser('forget-key',help='Delete the remembered encrypted provider key')
+    schedule=commands.add_parser('schedule',help='Schedule a goal; missed recurring slots coalesce into one occurrence')
+    schedule.add_argument('task');schedule.add_argument('--at',required=True,help='ISO 8601 time with timezone, e.g. 2026-10-09T09:00:00+08:00')
+    schedule.add_argument('--every-minutes',type=float)
+    schedule.add_argument('--autonomous',action='store_true');schedule.add_argument('--vision',action='store_true')
+    commands.add_parser('schedules',help='List local schedules and outstanding occurrences')
+    for verb in ('pause','resume','cancel'):
+        entry=commands.add_parser(verb+'-schedule');entry.add_argument('id')
     submit = commands.add_parser('submit', help='Save a goal for the Windows UI to execute; no desktop action here')
     submit.add_argument('task')
     submit.add_argument('--autonomous', action='store_true',help='Authorize automatic actions for this submitted goal')
@@ -55,6 +69,40 @@ def main():
     research.add_argument("--version", default="")
     research.add_argument("--source", action="append", help="Optional documentation HTTPS URL; repeat up to five times")
     args = parser.parse_args()
+    try:
+        if args.command=='worker':
+            from .resident import run_resident
+            run_resident(args.data_dir,once=args.once);return
+        if args.command=='worker-status':
+            path=args.data_dir/'worker-status.json'
+            result=json.loads(path.read_text()) if path.exists() else {'state':'not_started'}
+        elif args.command in ('remember-key','forget-key'):
+            from .local_credentials import save_key,forget_key
+            if args.command=='remember-key':
+                from getpass import getpass
+                save_key(args.data_dir,getpass('Provider API key (encrypted for this Windows account): '))
+                result={'remembered':True}
+            else:forget_key(args.data_dir);result={'remembered':False}
+        elif args.command in ('enable-startup','disable-startup'):
+            from .startup import set_startup
+            set_startup(args.data_dir,args.command=='enable-startup');result={'login_startup':args.command=='enable-startup'}
+        elif args.command in ('schedule','schedules','pause-schedule','resume-schedule','cancel-schedule'):
+            from .schedules import Schedules
+            schedules=Schedules(args.data_dir)
+            try:
+                if args.command=='schedule':result={'id':schedules.create(args.task,at=args.at,interval=args.every_minutes*60 if args.every_minutes is not None else None,
+                    autonomous=args.autonomous,use_vision=args.vision),'state':'enabled'}
+                elif args.command=='schedules':result=schedules.list()
+                else:result={args.command:getattr(schedules,args.command.split('-')[0])(args.id)}
+            finally:schedules.close()
+        else:
+            return _command(args,parser)
+        print(json.dumps(result,indent=2));return
+    except (RuntimeError,KeyError,ValueError,OSError) as error:
+        parser.exit(1,f'{error}\n')
+
+
+def _command(args,parser):
     try:
         if args.command == "connect":
             from .remote_ui import launch_connection

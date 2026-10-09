@@ -81,7 +81,8 @@ class Jobs:
     def close(self):
         self.db.close()
 
-    def submit(self, task, *, use_vision=False, autonomous=False, window=None):
+    @staticmethod
+    def options(task, use_vision=False, autonomous=False, window=None):
         if not isinstance(task, str) or not task.strip() or len(task) > 8000:
             raise ValueError('A saved goal must contain 1–8000 characters.')
         if type(use_vision) is not bool or type(autonomous) is not bool:
@@ -89,11 +90,18 @@ class Jobs:
         if window is not None and (not isinstance(window, dict) or set(window) != {'handle','process_id'}
                 or any(type(v) is not int or v <= 0 for v in window.values())):
             raise ValueError('Selected-window tasks need a positive window handle and process ID.')
-        identity, stamp = uuid.uuid4().hex, self.clock()
+        return {'use_vision':use_vision,'autonomous':autonomous,'window':window}
+
+    def _insert(self, task, options, stamp):
+        identity=uuid.uuid4().hex
+        self.db.execute('INSERT INTO jobs(id,task,options,status,created,updated,due) VALUES (?,?,?,?,?,?,?)',
+            (identity,task.strip(),json.dumps(options),'queued',stamp,stamp,stamp))
+        return identity
+
+    def submit(self, task, *, use_vision=False, autonomous=False, window=None):
+        options=self.options(task,use_vision,autonomous,window)
         with self.db:
-            self.db.execute('INSERT INTO jobs(id,task,options,status,created,updated,due) VALUES (?,?,?,?,?,?,?)',
-                (identity, task.strip(), json.dumps({'use_vision':use_vision, 'autonomous':autonomous,
-                    'window':window}), 'queued', stamp, stamp, stamp))
+            identity=self._insert(task,options,self.clock())
         return identity
 
     def get(self, identity):
@@ -151,21 +159,29 @@ class Jobs:
                  'Interrupted before an action or after a verified checkpoint; resuming.', stamp, stamp, row[0]))
             self.db.execute('UPDATE desktop_lease SET expires=0 WHERE owner=?', (row['owner'],))
 
-    def ready(self, credentials=False):
+    def ready(self, credentials=False, autonomous_only=False):
         self.db.execute('BEGIN IMMEDIATE')
         try:
             stamp = self.clock()
             self._recover(stamp)
             idle = self.db.execute('SELECT expires FROM desktop_lease WHERE singleton=1').fetchone()[0] <= stamp
-            available = idle and not self.paused() and bool(self.db.execute(
-                "SELECT 1 FROM jobs WHERE (status IN ('queued','retry_wait') AND due<=?) "
-                "OR (status='waiting_credentials' AND ?) LIMIT 1", (stamp,int(credentials))).fetchone())
+            available = idle and not self.paused() and any(not autonomous_only or json.loads(row[0])['autonomous'] for row in self.db.execute(
+                "SELECT options FROM jobs WHERE (status IN ('queued','retry_wait') AND due<=?) "
+                "OR (status='waiting_credentials' AND ?)", (stamp,int(credentials))))
             self.db.commit()
             return available
         except BaseException:
             self.db.rollback(); raise
 
-    def claim(self, identity=None, credentials=False):
+    def desktop_busy(self):
+        self.db.execute('BEGIN IMMEDIATE')
+        try:
+            stamp=self.clock();self._recover(stamp)
+            busy=self.db.execute('SELECT expires FROM desktop_lease WHERE singleton=1').fetchone()[0]>stamp
+            self.db.commit();return busy
+        except BaseException:self.db.rollback();raise
+
+    def claim(self, identity=None, credentials=False, autonomous_only=False):
         stamp, owner = self.clock(), uuid.uuid4().hex
         self.db.execute('BEGIN IMMEDIATE')
         try:
@@ -176,8 +192,8 @@ class Jobs:
             if self.paused() or lock['expires'] > stamp:
                 self.db.commit(); return None
             where, params = (" AND id=?", (identity,)) if identity else ('', ())
-            row = self.db.execute("SELECT id FROM jobs WHERE status IN ('queued','retry_wait') AND due<=?" + where +
-                ' ORDER BY created,id LIMIT 1', (stamp, *params)).fetchone()
+            row = next((row for row in self.db.execute("SELECT id,options FROM jobs WHERE status IN ('queued','retry_wait') AND due<=?" + where +
+                ' ORDER BY created,id', (stamp, *params)) if not autonomous_only or json.loads(row['options'])['autonomous']),None)
             if row is None:
                 self.db.commit(); return None
             self.db.execute("UPDATE jobs SET status='running',owner=?,owner_pid=?,lease=?,attempts=attempts+1,updated=? WHERE id=?",
@@ -221,6 +237,9 @@ class Jobs:
                 status, detail = 'paused', 'Stopped locally; safe checkpoints retained.'
             elif shutdown:
                 status, detail = 'queued', 'Application closed; safe checkpoints retained for restart.'
+            elif 'interactive desktop unavailable' in errors.casefold():
+                status,detail='retry_wait','Waiting for an unlocked interactive desktop; no unverified action replay.'
+                due=stamp+30
             elif re.search(r'HTTP (?:401|403)\b|needs AGENT_API_KEY|API key', errors, re.I):
                 status = 'waiting_credentials'
             elif item['attempts'] < 5 and re.search(r'HTTP (?:408|429|5\d\d)\b|timed?\s*out|timeout|connection|network|temporar|offline', errors, re.I):
@@ -239,6 +258,7 @@ class Jobs:
 class Checkpoint:
     def __init__(self, jobs, identity, owner):
         self.jobs, self.id, self.owner, self.step = jobs, identity, owner, 1
+        self.guard=None
 
     def _touch(self):
         stamp = self.jobs.clock()
@@ -247,6 +267,7 @@ class Checkpoint:
         if (self.jobs.paused() or item['status'] != 'running' or item['owner'] != self.owner
                 or lock['owner'] != self.owner or lock['expires'] <= stamp):
             raise LeaseLost('Saved task stopped or desktop ownership expired; no further action.')
+        if self.guard:self.guard()
         self.jobs.db.execute('UPDATE jobs SET lease=?,updated=? WHERE id=?', (stamp+self.jobs.LEASE_SECONDS,stamp,self.id))
         self.jobs.db.execute('UPDATE desktop_lease SET expires=? WHERE owner=?', (stamp+self.jobs.LEASE_SECONDS,self.owner))
 

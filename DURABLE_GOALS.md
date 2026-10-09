@@ -1,4 +1,4 @@
-# Persistent Windows goals — 0.11.0
+# Persistent Windows goals
 
 Chat and transcribed voice tasks now enter a local persistent queue. The agent saves the original goal, task permissions, selected window/process when supplied, app-version plan, verified outputs, action journal and recovery state. Closing and reopening the standalone agent retains this work.
 
@@ -10,7 +10,7 @@ Run `windows\Start.cmd` after setup. Submit a goal through **Run task** or push-
 
 Closing the agent retains safe work for the next launch. **STOP** explicitly pauses the queue across restarts and cancels further task actions. **Saved goals → Resume safe jobs** reactivates safe paused work. **Cancel selected** prevents a late worker result from reactivating a cancelled goal. Starting a new Run task also resumes the safe queue.
 
-The agent must be running on an interactive Windows desktop to execute GUI work. This release does not install an always-running service or replace the Cloudflare connection helper. API keys remain session-local; model calls still require the configured provider. Saved jobs do not contain API keys or controller private keys.
+The agent must be running on an interactive Windows desktop to execute GUI work. Version 0.13.0 adds an optional [background worker](BACKGROUND_AGENT.md), account-login startup, encrypted local provider credentials and schedules. It waits while the GUI is open or Windows is locked. It does not install a system service or replace the Cloudflare connection helper. Model calls still require the configured provider. Saved jobs do not contain API keys or controller private keys.
 
 ## Recovery rules
 
@@ -46,10 +46,10 @@ app-agent resume-jobs
 app-agent cancel-job JOB_ID
 ```
 
-`submit` queues the exact user goal; the Windows UI executes it when active. `--vision` authorizes window images for that goal. Without `--autonomous`, action approval remains supervised. The CLI does not automatically unpause an explicitly stopped queue. Job and checkpoint records are private user data; do not publish them in GitHub or support screenshots.
+`submit` queues the exact user goal; the Windows UI executes it when active, or the background worker executes it if `--autonomous` was explicitly supplied. `--vision` authorizes window images for that goal. Without `--autonomous`, action approval remains supervised. The CLI does not automatically unpause an explicitly stopped queue. Job and checkpoint records are private user data; do not publish them in GitHub or support screenshots.
 
 ## Validation
 
 Cloud tests cover real SQLite durability, actual child-process exit, cross-connection ownership, delayed retries, cancellation fencing, false-completion rejection and safe two-app continuation. Headless UI tests exercise typed tasks, voice submission, selected-window routing and startup queue continuation. Photoshop tests use real export fixtures with simulated COM/rendering. No new native Windows acceptance or paid-provider run is claimed by these tests.
 
-Persistent jobs are a step toward ongoing responsibility. Reconnecting outbound control, schedules/event-triggered user goals, editable personal memory, broader structured Office/mail tools and universal app coverage remain additional work.
+Persistent jobs and schedules are steps toward ongoing responsibility. Reconnecting outbound control, more event-triggered user goals, editable personal memory, broader structured Office/mail tools and universal app coverage remain additional work.

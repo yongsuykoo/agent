@@ -7,3 +7,7 @@ dist/
 remote-results/
 *controller-private*.json
 jobs.sqlite3*
+*.dpapi
+worker-status.json
+worker.lock
+ui.lock

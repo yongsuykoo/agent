@@ -32,9 +32,22 @@ def launch_research(function):
 
 
 def launch(data_dir):
+    from .session_lock import SessionLock
+    with SessionLock(data_dir,'ui'):
+        return _launch(data_dir)
+
+
+def _launch(data_dir):
     root = tk.Tk()
-    root.title("Personal App Agent — 0.12.0")
+    root.title("Personal App Agent — 0.13.0")
     root.geometry("980x820")
+    if not (os.getenv('AGENT_API_KEY') or os.getenv('OPENAI_API_KEY')):
+        from .local_credentials import load_key
+        try:
+            remembered=load_key(data_dir)
+            if remembered:os.environ['AGENT_API_KEY']=remembered
+        except Exception:
+            messagebox.showerror('Remembered key unavailable','The encrypted key could not be read for this Windows account. Enter a key locally to continue.',parent=root)
     if not (os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")):
         key = simpledialog.askstring("Cloud AI setup", "OpenAI API key (kept in memory for this session).\nLeave blank to inspect windows without AI.", show="*", parent=root)
         if key and key.strip():
@@ -95,6 +108,11 @@ def launch(data_dir):
     approval_buttons.pack(fill="x")
     log = tk.Text(frame, state="disabled", wrap="word")
     log.pack(fill="both", expand=True, pady=8)
+
+    def busy_elsewhere():
+        saved=Jobs(data_dir)
+        try:return saved.desktop_busy()
+        finally:saved.close()
 
     def append(text):
         log.configure(state="normal")
@@ -360,6 +378,8 @@ def launch(data_dir):
     def start_self_test():
         if state["busy"] or state["recording"]:
             return
+        if busy_elsewhere():
+            append('A background goal is still using the desktop. Self-test is deferred.');return
         state["busy"] = True
         cancel.clear()
         task_permission.clear()
@@ -374,6 +394,8 @@ def launch(data_dir):
     def start(mode):
         if state["busy"] or state["recording"]:
             return
+        if mode not in ('run','research','observe') and busy_elsewhere():
+            append('A background goal is still using the desktop. This operation is deferred.');return
         task = command.get("1.0", "end").strip()
         name = app_name.get().strip()
         index = windows.current()
@@ -700,7 +722,7 @@ def launch(data_dir):
                 for item in saved.list():
                     count = len((item['plan'] or {}).get('steps',[]))
                     tree.insert('','end',iid=item['id'],values=(item['task'],item['status'],f"{len(item['verified'])}/{count or '?'}"))
-                detail.set('Queue paused.' if saved.paused() else 'Queue active while the app is open.')
+                detail.set('Queue paused.' if saved.paused() else 'Queue runs through this app or the local background worker.')
             finally:
                 saved.close()
         def selection(event):
@@ -725,7 +747,90 @@ def launch(data_dir):
         for text,action in [('Refresh',refresh_jobs),('Resume safe jobs',resume_jobs),('Pause queue',lambda:(stop(),refresh_jobs())),('Cancel selected',cancel_job)]:
             ttk.Button(buttons,text=text,command=action).pack(side='left',padx=4)
         refresh_jobs()
+    def automation_settings():
+        from .local_credentials import credential_path,save_key,forget_key
+        from .startup import startup_enabled,set_startup
+        from .schedules import Schedules
+        import subprocess
+        import sys
+        dialog=tk.Toplevel(root);dialog.title('Background work and schedules');dialog.geometry('900x600')
+        ttk.Label(dialog,text='The local worker runs authorized saved goals when Windows is unlocked and this window is closed. STOP pauses the shared queue.',wraplength=860).pack(anchor='w',padx=10,pady=8)
+        remember=tk.BooleanVar(value=credential_path(data_dir).exists())
+        login=tk.BooleanVar(value=startup_enabled())
+        known=Catalog(data_dir)
+        try:study=tk.BooleanVar(value=known.setting('resident_study',False))
+        finally:known.close()
+        ttk.Label(dialog,text='Provider API key (hidden; retained locally only)').pack(anchor='w',padx=10)
+        entry=ttk.Entry(dialog,show='*');entry.pack(fill='x',padx=10)
+        entry.insert(0,os.getenv('AGENT_API_KEY') or os.getenv('OPENAI_API_KEY') or '')
+        ttk.Checkbutton(dialog,text='Remember this key encrypted for this Windows account',variable=remember).pack(anchor='w',padx=10)
+        ttk.Checkbutton(dialog,text='Start the background worker when I log in to Windows',variable=login).pack(anchor='w',padx=10)
+        ttk.Checkbutton(dialog,text='Study new apps in background (provider charges; existing optional study budget applies)',variable=study).pack(anchor='w',padx=10)
+        def apply_settings():
+            try:
+                key=entry.get().strip()
+                if key:
+                    key=validate_api_key(key)
+                    if remember.get():save_key(data_dir,key)
+                    os.environ['AGENT_API_KEY']=key;state['wake_credentials']=True
+                elif remember.get() and not credential_path(data_dir).exists():raise ValueError('Enter a provider key before enabling encrypted key storage.')
+                if not remember.get():forget_key(data_dir)
+                set_startup(data_dir,login.get())
+                known=Catalog(data_dir)
+                try:known.set_setting('resident_study',study.get())
+                finally:known.close()
+                append('Automation settings saved. No provider key appears in startup commands.')
+            except Exception as error:messagebox.showerror('Automation settings',str(error),parent=dialog)
+        def start_background():
+            try:
+                subprocess.Popen([sys.executable,'-m','app_agent.cli','--data-dir',str(data_dir),'worker'],
+                    creationflags=0x08000000 if os.name=='nt' else 0,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                append('Background worker started; it waits for this GUI to close and runs authorized saved goals.')
+            except Exception as error:messagebox.showerror('Background worker',str(error),parent=dialog)
+        row=ttk.Frame(dialog);row.pack(fill='x',padx=10,pady=8)
+        ttk.Button(row,text='Save settings',command=apply_settings).pack(side='left')
+        ttk.Button(row,text='Start worker now',command=start_background).pack(side='left',padx=5)
+        ttk.Button(row,text='Pause all goals',command=stop).pack(side='left',padx=5)
+        ttk.Label(dialog,text='Schedule the current chat task. Each occurrence keeps its original task and permissions; overlapping or uncertain occurrences do not repeat.',wraplength=860).pack(anchor='w',padx=10,pady=6)
+        minutes=tk.IntVar(value=60);repeat=tk.BooleanVar(value=False)
+        row=ttk.Frame(dialog);row.pack(fill='x',padx=10)
+        ttk.Label(row,text='Run after minutes:').pack(side='left')
+        ttk.Spinbox(row,from_=1,to=44640,textvariable=minutes,width=6).pack(side='left',padx=5)
+        ttk.Checkbutton(row,text='Repeat at this interval',variable=repeat).pack(side='left')
+        tree=ttk.Treeview(dialog,columns=('task','state','runs'),show='headings')
+        for name,label in [('task','Goal'),('state','State'),('runs','Occurrences')]:tree.heading(name,text=label)
+        tree.pack(fill='both',expand=True,padx=10,pady=8)
+        def refresh_schedules():
+            schedules=Schedules(data_dir)
+            try:
+                for item in tree.get_children():tree.delete(item)
+                for item in schedules.list():tree.insert('','end',iid=item['id'],values=(item['task'],item['state'],item['occurrences']))
+            finally:schedules.close()
+        def create_schedule():
+            schedules=Schedules(data_dir)
+            try:
+                delay=minutes.get()*60
+                if not 60<=delay<=2678400:raise ValueError('Choose one minute to 31 days.')
+                identity=schedules.create(command.get('1.0','end').strip(),at=time.time()+delay,
+                    interval=delay if repeat.get() else None,autonomous=autonomous_tasks.get(),use_vision=vision.get())
+                append('Schedule saved: '+identity[:8]+'. Missed repeated slots coalesce into one goal.')
+                refresh_schedules()
+            except Exception as error:messagebox.showerror('Schedule',str(error),parent=dialog)
+            finally:schedules.close()
+        def schedule_action(action):
+            if not tree.selection():return
+            schedules=Schedules(data_dir)
+            try:getattr(schedules,action)(tree.selection()[0]);refresh_schedules()
+            except Exception as error:messagebox.showerror('Schedule',str(error),parent=dialog)
+            finally:schedules.close()
+        row=ttk.Frame(dialog);row.pack(fill='x',padx=10,pady=5)
+        ttk.Button(row,text='Schedule current task',command=create_schedule).pack(side='left',padx=3)
+        for label,action in [('Pause','pause'),('Resume future runs','resume'),('Cancel','cancel')]:
+            ttk.Button(row,text=label,command=lambda action=action:schedule_action(action)).pack(side='left',padx=3)
+        ttk.Button(row,text='Refresh',command=refresh_schedules).pack(side='left',padx=3)
+        refresh_schedules()
     ttk.Button(toolbar,text='Saved goals',command=show_jobs).pack(side='left',padx=5)
+    ttk.Button(learning_options,text='Background & schedules',command=automation_settings).pack(side='left',padx=5)
     ttk.Checkbutton(learning_bar, text="Automatically study discovered/new apps", variable=auto_learn, command=learning_settings).pack(side="left")
     ttk.Label(learning_options, text="Daily studies/designs (0 = uncapped):").pack(side="left", padx=5)
     ttk.Spinbox(learning_options, from_=0, to=10000, textvariable=learning_limit, width=5, command=learning_settings).pack(side="left")
@@ -780,6 +885,7 @@ def launch(data_dir):
     def background_practice():
         if state["busy"] or state["recording"] or state["learning_paused"]:
             return
+        if busy_elsewhere():return
         state["practice_pending"] = False
         try:
             daily_limit = learning_limit.get()
@@ -871,6 +977,10 @@ def launch(data_dir):
     def maintenance():
         if state["closing"]:
             return
+        from .schedules import Schedules
+        recurring=Schedules(data_dir)
+        try:recurring.tick()
+        finally:recurring.close()
         changed = inventory_events.poll() or installation_monitor.poll()
         if not state["busy"] and not state["recording"]:
             if changed or time.monotonic() - state["last_scan"] > 300:

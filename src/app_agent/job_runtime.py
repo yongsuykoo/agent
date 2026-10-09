@@ -10,13 +10,16 @@ from .runner import TaskRunner
 
 def run_next(directory, cloud, approve, emit, cancel=None, *, identity=None,
              credentials=False, shutdown=lambda:False, desktop=WindowsDesktop,
-             resolve=resolve_window, director=TaskDirector, runner=TaskRunner):
+             resolve=resolve_window, director=TaskDirector, runner=TaskRunner,
+             autonomous_only=False,execution_guard=None):
     jobs, catalog = Jobs(directory), None
-    checkpoint = jobs.claim(identity, credentials=credentials)
+    checkpoint = jobs.claim(identity, credentials=credentials,autonomous_only=autonomous_only)
     if checkpoint is None:
         jobs.close()
         return None
     try:
+        checkpoint.guard=execution_guard
+        checkpoint.touch()
         item = jobs.get(checkpoint.id)
         emit(f'Saved task {item["id"][:8]}: {item["task"]}')
         catalog = Catalog(directory)

@@ -88,6 +88,35 @@ class ImmediateWorker:
 
 
 class InterfaceFlowTests(unittest.TestCase):
+    def test_background_settings_and_schedule_controls_persist_without_extra_actions(self):
+        class Tree(Widget):
+            instances=[]
+            def __init__(self,*args,**kwargs):super().__init__(*args,**kwargs);self.items={};self.instances.append(self)
+            def heading(self,*args,**kwargs):pass
+            def get_children(self):return list(self.items)
+            def insert(self,*args,iid,values):self.items[iid]=values
+            def delete(self,item):del self.items[item]
+            def selection(self):return list(self.items)[:1]
+        class SettingsRoot(Root):
+            def mainloop(self):
+                maintenance=next(fn for delay,fn in self.callbacks if delay==1000)
+                pump=next(fn for delay,fn in self.callbacks if delay==100)
+                maintenance();pump();self.buttons['Run task']();pump()
+                self.buttons['Background & schedules']()
+                self.buttons['Save settings']()
+                self.buttons['Schedule current task']()
+                self.buttons['Pause']()
+                self.buttons['Resume future runs']()
+                self.buttons['Cancel']()
+                self.close()
+        root=SettingsRoot()
+        with patch.object(ui.tk,'Toplevel',return_value=Root()),patch.object(ui.ttk,'Treeview',Tree),patch('app_agent.startup.startup_enabled',return_value=False),patch('app_agent.startup.set_startup') as startup,patch('app_agent.local_credentials.forget_key') as forget,patch.object(ui.messagebox,'showerror') as error:
+            self.test_startup_discovery_auto_route_research_and_memory(root=root)
+        error.assert_not_called();startup.assert_called_once();self.assertFalse(startup.call_args.args[1]);forget.assert_called_once()
+        self.assertEqual(len(Tree.instances[-1].items),1)
+        row=next(iter(Tree.instances[-1].items.values()))
+        self.assertEqual(row,('Calculate 23 plus 19 and verify the result.','cancelled',0))
+
     def test_saved_goal_resumes_on_startup_without_a_run_click(self):
         class RestartRoot(Root):
             def mainloop(self):

@@ -14,9 +14,11 @@ def register_stop(callback, emit):
         user32 = ctypes.windll.user32
         identifier = 1
         # Ctrl + Alt + F12, plus MOD_NOREPEAT.
-        if not user32.RegisterHotKey(None, identifier, 0x0002 | 0x0001 | 0x4000, 0x7B):
-            emit("Global stop shortcut unavailable; use the STOP button or Esc in this window.")
-            return
+        warned=False
+        while not user32.RegisterHotKey(None, identifier, 0x0002 | 0x0001 | 0x4000, 0x7B):
+            if not warned:
+                emit("Global stop shortcut temporarily unavailable; retrying. Use STOP or Esc in this window.");warned=True
+            if stopped.wait(1):return
         message = wintypes.MSG()
         try:
             while not stopped.wait(0.05):
