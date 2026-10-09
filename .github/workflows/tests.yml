@@ -16,6 +16,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         python: ['3.11', '3.14']
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -27,5 +28,21 @@ jobs:
       - name: Install Windows package and dependencies
         if: runner.os == 'Windows'
         run: python -m pip install -e ".[windows,bridge]"
-      - name: Run simulated regression tests
+      - name: Run regression tests
         run: python -m unittest discover -s tests -v
+      - name: Run real Windows file checks
+        if: runner.os == 'Windows'
+        run: python -m app_agent.cli --data-dir "${{ runner.temp }}/app-agent-files" file-smoke
+      - name: Run real Windows Edge or Chrome fixture checks
+        if: runner.os == 'Windows'
+        run: python -m app_agent.cli --data-dir "${{ runner.temp }}/app-agent-browser" browser-smoke
+      - name: Retain only disposable fixture reports
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-fixture-reports-python-${{ matrix.python }}
+          path: |
+            ${{ runner.temp }}/app-agent-files/**/report.json
+            ${{ runner.temp }}/app-agent-browser/**/report.json
+          if-no-files-found: warn
+          retention-days: 14

@@ -88,6 +88,16 @@ class ImmediateWorker:
 
 
 class InterfaceFlowTests(unittest.TestCase):
+    def setUp(self):
+        # The fake Tk event loop exercises persistence and task routing, never
+        # the CI runner's native registry, installer events or installed apps.
+        for target,value in (
+            ('app_agent.inventory_events.InventoryEvents',Mock(poll=Mock(return_value=False))),
+            ('app_agent.installation_watch.InstallationMonitor',Mock(poll=Mock(return_value=False))),
+            ('app_agent.windows_probe.probe_windows',{'os':{},'app_paths':[],'com_servers':[],'file_types':[],'warnings':[]}),
+        ):
+            patcher=patch(target,return_value=value);patcher.start();self.addCleanup(patcher.stop)
+
     def test_browser_session_manager_runs_manual_login_without_provider_or_task(self):
         from app_agent.browser_sessions import BrowserSessions
         class Tree(Widget):
@@ -327,7 +337,8 @@ class InterfaceFlowTests(unittest.TestCase):
             "controls": [{'id':1,'type':'Text','name':'Display is 42','value':'','visible':True,'enabled':True,'automation_id':'CalculatorResults'}]}
         runner = Mock()
         runner.return_value.run.return_value = {"task": "Calculate", "outcome": "result_observed", "actions_executed": 6, "history": [{"verification": {"window": "Calculator", "controls": []}}]}
-        blueprint = {"name": "Calculator", "version": "1", "capabilities": [{"name": "Add"}]}
+        blueprint = {"name": "Calculator", "version": "1", "sources": [], "limitations": [],
+                     "capabilities": [{"name": "Add", "source_urls": []}]}
         with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"AGENT_API_KEY": "test-key"}), \
              patch.object(ui.tk, "Tk", return_value=root), patch.object(ui.tk, "StringVar", Variable), \
              patch.object(ui.tk, "BooleanVar", Variable), patch.object(ui.tk, "IntVar", Variable), patch.object(ui.tk, "Text", Widget), \

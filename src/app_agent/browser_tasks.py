@@ -55,13 +55,15 @@ def run_browser(director,task,request,browser_factory=None,session_store=None):
         desktop=checkpoint.desktop(browser) if checkpoint else browser
         # The exact full user goal and installed browser revision identify a recipe.
         version={key:browser.info.get(key) for key in ('product','revision','protocolVersion')}
+        from .browser_scripts import DOM_TOOLS_VERSION
+        version['dom_tools']=DOM_TOOLS_VERSION
         if session:version['session']={key:session.metadata[key] for key in ('id','revision','origin')}
         key='browser-workflow:'+hashlib.sha256(task.encode()).hexdigest()
         cached=director.catalog.setting(key,{})
         previous=[cached['record']] if cached.get('version')==version and cached.get('record',{}).get('recipe') else []
-        blueprint={'name':'Isolated browser DOM','capabilities':['Read rendered controls','Replace text-field value','Click a control','Set checkbox state'],
+        blueprint={'name':'Isolated browser DOM','capabilities':['Read rendered controls including open shadow roots and same-origin frames','Replace text-field value','Click a control','Set checkbox state','Select one enabled dropdown option using text equal to its exact advertised value'],
                    'limitations':['Use only advertised control actions. No password entry, file uploads, downloads, arbitrary JavaScript, imported personal browser profiles or cookie export. A named session uses only its previously configured agent-owned profile and site origin.',
-                                  'Completion requires exact case-sensitive rendered output, not a text-input value or a button label. Only one tab and the top-level DOM are observed.']}
+                                  'Completion requires exact case-sensitive rendered output, not a text-input or select value or a button label. Only one tab, bounded open shadow roots and same-origin frames are observed; closed roots and cross-origin frames are unavailable. Dropdowns with ambiguous values, multiple selection, excessive options or oversized option labels cannot be selected.']}
         record=director.runner(desktop,director.cloud,director.approve,director.emit,director.directory,director.cancel).run(
             task,blueprint,max_steps=16,previous_workflows=previous,required_result_text=request['expected_result'],result_control_id='page:output')
         result['steps'].append({'tool':'browser','version':version,'record':record})

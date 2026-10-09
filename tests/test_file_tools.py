@@ -14,7 +14,7 @@ import unittest
 from unittest.mock import Mock,patch
 import zipfile
 from app_agent.catalog import Catalog
-from app_agent.file_tools import file_request,prepare,inventory,execute,verify,validate_manifest,read_chunks,safe_path,windows_path
+from app_agent.file_tools import file_request,prepare,inventory,execute,verify,validate_manifest,read_chunks,safe_path,windows_path,opened_matches_path
 from app_agent.file_tasks import run_files
 from app_agent.jobs import Jobs
 from app_agent.job_runtime import run_next
@@ -64,6 +64,39 @@ class RequestTests(unittest.TestCase):
 
 
 class ArtifactTests(FileFixture):
+    def test_windows_creation_and_change_time_difference_does_not_block_unchanged_file(self):
+        original=os.fstat
+        def changed_ctime(fd):
+            info=original(fd)
+            return types.SimpleNamespace(**{key:getattr(info,key) for key in dir(info) if key.startswith('st_') and key!='st_ctime_ns'},st_ctime_ns=info.st_ctime_ns+1)
+        def windows_binding(before,opened):return opened_matches_path(before,opened,windows=True)
+        path=self.source/'binary.bin'
+        with patch('app_agent.file_tools.os.fstat',side_effect=changed_ctime),patch('app_agent.file_tools.opened_matches_path',side_effect=windows_binding):
+            self.assertEqual(b''.join(read_chunks(path,lambda:None)),path.read_bytes())
+
+    def test_handle_change_time_remains_checked_independently_on_windows(self):
+        original=os.fstat;calls=0
+        def changed_ctime(fd):
+            nonlocal calls
+            calls+=1;info=original(fd)
+            return types.SimpleNamespace(**{key:getattr(info,key) for key in dir(info) if key.startswith('st_') and key!='st_ctime_ns'},st_ctime_ns=info.st_ctime_ns+calls)
+        def windows_binding(before,opened):return opened_matches_path(before,opened,windows=True)
+        with patch('app_agent.file_tools.os.fstat',side_effect=changed_ctime),patch('app_agent.file_tools.opened_matches_path',side_effect=windows_binding),self.assertRaisesRegex(ValueError,'while being read'):
+            list(read_chunks(self.source/'binary.bin',lambda:None))
+
+    def test_file_binding_rejects_replaced_inode_and_creation_time_on_windows(self):
+        info=(self.source/'binary.bin').stat()
+        values={key:getattr(info,key) for key in dir(info) if key.startswith('st_')}
+        for key in ('st_dev','st_ino','st_size','st_mtime_ns','st_birthtime_ns'):
+            changed={**values,key:getattr(info,key,0)+1}
+            with self.subTest(key=key):self.assertFalse(opened_matches_path(info,types.SimpleNamespace(**changed),windows=True))
+
+    def test_posix_binding_still_rejects_change_time_mismatch(self):
+        info=(self.source/'binary.bin').stat()
+        values={key:getattr(info,key) for key in dir(info) if key.startswith('st_')}
+        values['st_ctime_ns']+=1
+        self.assertFalse(opened_matches_path(info,types.SimpleNamespace(**values),windows=False))
+
     def test_real_copy_folder_preserves_all_bytes_unicode_zero_length_and_empty_directories(self):
         request,manifest,proof=self.run_operation('copy_folder')
         self.assertEqual(inventory(Path(request['destination']),'copy_folder'),manifest)

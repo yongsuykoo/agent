@@ -148,13 +148,16 @@ class Browser:
         self.url=snapshot['url']
         self.controls={c['id']:c for c in snapshot['controls']}
         return {'window':'Managed browser page','window_handle':self.identity,'process_id':self.process.pid,
-                'url':snapshot['url'],'page_title':snapshot['title'],'controls':snapshot['controls']}
+                'url':snapshot['url'],'page_title':snapshot['title'],'controls':snapshot['controls'],'coverage':snapshot.get('coverage',{})}
 
     def act(self,action):
         if self.session:self.session.validate();self.session.check_url(self.url)
         self.guard();control=self.controls.get(action.get('target'))
         if not control or control['password'] or action['kind'] not in control['actions']:raise ValueError('Browser action does not identify an available control.')
-        if action['kind']=='type' and (not isinstance(action.get('text'),str) or len(action['text'])>2000):raise ValueError('Browser text entry is invalid.')
+        if action['kind'] in ('type','select') and (not isinstance(action.get('text'),str) or len(action['text'])>2000):raise ValueError('Browser text entry or selection value is invalid.')
+        if action['kind']=='select':
+            options=[o for o in control.get('state',{}).get('options',[]) if o['value']==action['text']]
+            if len(options)!=1 or not options[0]['enabled']:raise ValueError('Browser selection needs one enabled advertised option value.')
         if action['kind']=='toggle' and action.get('state') not in ('on','off'):raise ValueError('Browser checkbox needs an explicit state.')
         if control.get('href'):self.check_url(control['href'])
         if self.session and control.get('href'):self.session.check_url(control['href'])

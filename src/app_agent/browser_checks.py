@@ -30,6 +30,33 @@ PAGE='''<!doctype html><meta charset="utf-8"><title>Disposable browser check</ti
  document.querySelector('#result').textContent=(await r.json()).result;
 };</script>'''
 
+NESTED_FORM='''<label>Message<input id="message"></label><label>Confirmed<input id="confirm" type="checkbox"></label>
+<select id="delivery" aria-label="Delivery"><option value="standard">Standard</option><option value="express">Express 世界</option><option value="disabled" disabled>Unavailable</option><optgroup label="Blocked group" disabled><option value="blocked">Blocked</option></optgroup></select>
+<select aria-label="Ambiguous"><option value="same">One</option><option value="same">Two</option></select>
+<select aria-label="Multiple" multiple><option value="a">A</option></select>
+<select aria-label="Too many">'''+''.join('<option value="'+str(i)+'">Option '+str(i)+'</option>' for i in range(81))+'''</select>
+<input type="password" aria-label="Nested password" value="nested-password-must-stay-private">
+<button id="apply">Apply</button><output id="result" style="display:block"></output>'''
+
+NESTED_PAGE='''<!doctype html><meta charset="utf-8"><title>Nested interface check</title>
+<div id="host"></div><div id="hidden" style="opacity:0"></div><div id="inert" inert></div><div id="closed"></div>
+<iframe sandbox src="/foreign" title="Unavailable isolated frame"></iframe>
+<script>
+document.querySelector('#host').attachShadow({mode:'open'}).innerHTML='<iframe id="embedded" src="/frame-form" style="width:900px;height:450px" title="Embedded form"></iframe>';
+document.querySelector('#hidden').attachShadow({mode:'open'}).innerHTML='<input aria-label="Hidden nested field"><output>Hidden nested proof</output>';
+document.querySelector('#inert').attachShadow({mode:'open'}).innerHTML='<button>Inert component button</button>';
+document.querySelector('#closed').attachShadow({mode:'closed'}).innerHTML='<input aria-label="Closed component field">';
+</script>'''
+
+FRAME_PAGE='''<!doctype html><meta charset="utf-8"><title>Embedded form</title><div id="component"></div><script>
+const form=document.querySelector('#component').attachShadow({mode:'open'});
+form.innerHTML='''+json.dumps(NESTED_FORM)+''';
+form.querySelector('#apply').onclick=async()=>{
+ if(!form.querySelector('#confirm').checked)return;
+ const r=await fetch('/commit',{method:'POST',body:JSON.stringify({text:form.querySelector('#message').value+' / '+form.querySelector('#delivery').value})});
+ form.querySelector('#result').textContent=(await r.json()).result;
+};</script>'''
+
 
 class Fixture:
     def __init__(self):
@@ -40,6 +67,9 @@ class Fixture:
                 if self.path=='/redirect':
                     self.send_response(302);self.send_header('Location','http://127.0.0.1:1/private');self.end_headers();return
                 body='<h1>Navigation complete</h1>' if self.path=='/next' else PAGE
+                if self.path=='/nested':body=NESTED_PAGE
+                elif self.path in ('/frame-form','/frame-changed'):body=FRAME_PAGE
+                elif self.path=='/foreign':body='<input aria-label="Foreign field"><output>Foreign proof</output>'
                 if self.path=='/account':
                     if self.signed_in():owner.auth_requests+=1;body=PAGE+'<p>Account: fixture member</p>'
                     else:body='<h1>Sign in required</h1>'
@@ -76,6 +106,22 @@ class FixturePlanner:
             elif checkbox['state']['toggle']!='on':target=checkbox;action={'kind':'toggle','state':'on'}
             else:target=next(c for c in controls if c['name']=='Apply');action={'kind':'click'}
             action.update(target=target['id'],automation_id=target['automation_id'],target_name=target['name'],reason='Operate disposable fixture.')
+        return {'output':[{'content':[{'type':'output_text','text':json.dumps(action)}]}]}
+
+
+class NestedPlanner(FixturePlanner):
+    def request(self,**payload):
+        self.calls+=1;obs=json.loads(payload['input'])['observation'];expected='Saved: '+self.text+' / express'
+        if result_matches(obs,expected,result_control_id='page:output'):
+            action={'kind':'finish','expected_text':expected,'reason':'Verify the actual nested rendered output.'}
+        else:
+            controls=obs['controls'];editor=next(c for c in controls if c['name']=='Message')
+            dropdown=next(c for c in controls if c['name']=='Delivery');checkbox=next(c for c in controls if c['name']=='Confirmed')
+            if editor['value']!=self.text:target=editor;action={'kind':'type','text':self.text}
+            elif dropdown['value']!='express':target=dropdown;action={'kind':'select','text':'express'}
+            elif checkbox['state']['toggle']!='on':target=checkbox;action={'kind':'toggle','state':'on'}
+            else:target=next(c for c in controls if c['name']=='Apply');action={'kind':'click'}
+            action.update(target=target['id'],automation_id=target['automation_id'],target_name=target['name'],reason='Operate only the owned embedded fixture.')
         return {'output':[{'content':[{'type':'output_text','text':json.dumps(action)}]}]}
 
 
@@ -231,6 +277,95 @@ def browser_smoke(directory,emit=print,cancel=None,*,fixture_no_sandbox=False):
             if old==browser.session.metadata['id'] or not result_matches(browser.observe(),'Sign in required',result_control_id='page:output'):raise RuntimeError('Removed browser session retained authentication.')
             return {'owned_profile_removed':True,'recreated_profile_has_no_authentication':True}
         finally:browser.close()
+    nested_goal=f'Open "{fixture.url}nested" in a browser and enter Message, choose Express delivery, confirm, and click Apply and verify exactly: "Saved: Hello 世界 / express"'
+    def nested_browser():
+        browser=factory(guard)
+        try:
+            browser.start(fixture.url+'nested');deadline=time.monotonic()+3
+            while time.monotonic()<deadline:
+                if any(c['name']=='Delivery' for c in browser.observe()['controls']):return browser
+                cancel.wait(.05);guard()
+            raise RuntimeError('Owned embedded fixture did not finish loading.')
+        except BaseException:browser.close();raise
+    def nested_roundtrip():
+        before=len(fixture.commits);data=root/'nested-data';catalog=Catalog(data)
+        try:
+            result=run_browser(TaskDirector(catalog,NestedPlanner(),lambda *args:True,emit,data,cancel),nested_goal,browser_request(nested_goal),factory)
+            if result['outcome']!='steps_verified' or fixture.commits[before:]!=['Hello 世界 / express']:raise RuntimeError('Nested form was not independently verified: '+str(result.get('error',result.get('outcome'))))
+            proof=json.loads(Path(result['steps'][0]['proof']['path']).read_text())
+            output=next(c for c in proof['controls'] if c['automation_id']=='page:output' and c['name']=='Saved: Hello 世界 / express')
+            kinds=[p['kind'] for p in output['state']['context']['path']]
+            if kinds!=['shadow','frame','shadow']:raise RuntimeError('Nested evidence does not identify its component/frame context.')
+            return {'actual_submissions':1,'independently_verified_context':kinds,'actions':result['steps'][0]['record']['actions_executed']}
+        finally:catalog.close()
+    def dropdown_protection():
+        browser=nested_browser()
+        try:
+            snapshot=browser.observe();controls={c['name']:c for c in snapshot['controls']}
+            if controls['Multiple']['actions'] or controls['Too many']['actions']:raise RuntimeError('Unsupported dropdown advertised selection.')
+            for name,value in [('Delivery','disabled'),('Delivery','blocked'),('Delivery','missing'),('Ambiguous','same')]:
+                try:browser.act({'kind':'select','target':controls[name]['id'],'text':value})
+                except ValueError:pass
+                else:raise RuntimeError('Unavailable or ambiguous option was selected.')
+            if browser.observe()['controls']!=snapshot['controls']:raise RuntimeError('Rejected selection changed the form.')
+            return {'disabled_options_rejected':True,'ambiguous_values_rejected':True,'unsupported_selects_unavailable':True}
+        finally:browser.close()
+    def nested_privacy():
+        browser=nested_browser()
+        try:
+            snapshot=browser.observe();controls={c['name']:c for c in snapshot['controls']}
+            if 'nested-password-must-stay-private' in json.dumps(snapshot) or controls['Nested password']['actions']:raise RuntimeError('Nested password exposed.')
+            if any(name in controls for name in ('Hidden nested field','Closed component field','Foreign field')):raise RuntimeError('Unavailable nested controls were exposed.')
+            if controls['Inert component button']['actions'] or controls['Inert component button']['enabled']:raise RuntimeError('Inert shadow ancestor was ignored.')
+            if result_matches(snapshot,'Hidden nested proof',result_control_id='page:output') or result_matches(snapshot,'Foreign proof',result_control_id='page:output'):raise RuntimeError('Unavailable nested output certified success.')
+            if snapshot['coverage']['frames_unavailable']<1:raise RuntimeError('Unavailable embedded frame was not reported.')
+            return {'password_protected':True,'hidden_inert_closed_and_cross_origin_controls_unavailable':True}
+        finally:browser.close()
+    def nested_stale():
+        browser=nested_browser()
+        target_js="document.querySelector('#host').shadowRoot.querySelector('iframe').contentDocument.querySelector('#component').shadowRoot"
+        try:
+            snapshot=browser.observe();target=next(c for c in snapshot['controls'] if c['name']=='Delivery')
+            browser.evaluate(target_js+".querySelector('#delivery').options[1].label='Changed choice'")
+            try:browser.act({'kind':'select','target':target['id'],'text':'express'})
+            except RuntimeError:pass
+            else:raise RuntimeError('Changed dropdown choices were accepted.')
+            snapshot=browser.observe();target=next(c for c in snapshot['controls'] if c['name']=='Message')
+            browser.evaluate("document.querySelector('#host').shadowRoot.querySelector('iframe').contentWindow.history.pushState({},'', '/frame-changed')")
+            try:browser.act({'kind':'type','target':target['id'],'text':'must not enter'})
+            except RuntimeError:pass
+            else:raise RuntimeError('Changed embedded page URL was accepted.')
+            snapshot=browser.observe();target=next(c for c in snapshot['controls'] if c['name']=='Message')
+            browser.evaluate("document.querySelector('#host').shadowRoot.querySelector('iframe').remove()")
+            try:browser.act({'kind':'type','target':target['id'],'text':'must not enter'})
+            except RuntimeError:pass
+            else:raise RuntimeError('Detached embedded document was operated.')
+            return {'changed_options_rejected':True,'changed_frame_url_rejected':True,'detached_frame_rejected':True}
+        finally:browser.close()
+    def nested_replay():
+        data=root/'nested-queue';before=len(fixture.commits)
+        class Director(TaskDirector):
+            def run(self,goal,use_vision=False):return run_browser(self,goal,browser_request(goal),factory)
+        class NoProvider:
+            def request(self,**kwargs):raise RuntimeError('Nested replay requested a provider.')
+        for planner in (NestedPlanner(),NoProvider()):
+            jobs=Jobs(data)
+            try:identity=jobs.submit(nested_goal,autonomous=True)
+            finally:jobs.close()
+            result=run_next(data,planner,lambda *args:True,emit,cancel,director=Director)
+            if result['id']!=identity or result['status']!='completed':raise RuntimeError('Nested queued goal failed: '+str(result['detail']))
+        if fixture.commits[before:]!=['Hello 世界 / express','Hello 世界 / express'] or result['result']['steps'][0]['record']['execution_mode']!='local_replay':raise RuntimeError('Nested replay produced incorrect effects.')
+        return {'actual_submissions':2,'replay_provider_calls':0,'context_guards_rechecked':True}
+    def traversal_limits():
+        browser=factory(guard)
+        try:
+            browser.start(fixture.url)
+            browser.evaluate("document.body.replaceChildren(); for(let i=0;i<8200;i++){const el=document.createElement(i<250?'button':'span');el.textContent='Bounded '+i;document.body.append(el);} const late=document.createElement('output');late.textContent='Late proof';document.body.append(late)")
+            snapshot=browser.observe()
+            if not snapshot['coverage']['limited'] or snapshot['coverage']['elements']>8000 or len(snapshot['controls'])>402:raise RuntimeError('DOM observation exceeded its advertised limits.')
+            if result_matches(snapshot,'Late proof',result_control_id='page:output') or browser.evaluate('globalThis.__appAgent.nodes.size')>400:raise RuntimeError('Out-of-scope output or unbounded retained node map.')
+            return {'bounded_elements':snapshot['coverage']['elements'],'bounded_controls':len(snapshot['controls']),'uninspected_output_not_certified':True}
+        finally:browser.close()
     checks=[('Real Unicode form submission and rendered output verification',roundtrip),
             ('Password/read-only/upload protection and isolated DOM world',privacy),
             ('Premature completion is rejected',false_completion),
@@ -243,7 +378,13 @@ def browser_smoke(directory,emit=print,cancel=None,*,fixture_no_sandbox=False):
             ('Separate browser profiles do not inherit account authentication',separated_accounts),
             ('Authenticated queued tasks replay without another provider',account_replay),
             ('An owned account profile cannot be opened concurrently',busy_session),
-            ('Removing an owned profile clears its account session',remove_session)]
+            ('Removing an owned profile clears its account session',remove_session),
+            ('Nested shadow/frame form submission and dropdown selection',nested_roundtrip),
+            ('Disabled ambiguous and unsupported dropdowns cannot be selected',dropdown_protection),
+            ('Nested password and unavailable context protections',nested_privacy),
+            ('Stale dropdown and embedded frame contexts reject actions',nested_stale),
+            ('Nested queued workflows replay with zero provider calls',nested_replay),
+            ('DOM traversal and retained node maps are bounded',traversal_limits)]
     emit('Private browser fixtures only; deterministic local planner, no provider calls or existing accounts.')
-    try:return run_checks(checks,root/'report.json',cancel,emit,scope='Thirteen real Chromium fixture checks including retained account authentication; deterministic planner, no external accounts or all-app certification. Linux fixture sandbox disabled: '+str(fixture_no_sandbox))
+    try:return run_checks(checks,root/'report.json',cancel,emit,scope='Nineteen real Chromium fixture checks including owned sessions, dropdowns, open shadow roots and same-origin embedded forms; deterministic planner, no external accounts or all-app certification. Linux fixture sandbox disabled: '+str(fixture_no_sandbox))
     finally:fixture.close()
