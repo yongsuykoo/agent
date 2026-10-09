@@ -3,6 +3,7 @@ import hashlib
 from importlib import resources
 import json
 import os
+import stat
 import subprocess
 import sys
 import threading
@@ -51,10 +52,11 @@ def installed_pdf(catalog,app,evidence,manual):
     path=safe_path(root/relative)
     if not path.is_relative_to(root):raise ValueError('PDF manual path left its installation scope.')
     before=path.stat()
+    if not stat.S_ISREG(before.st_mode):raise ValueError('Installed PDF must be a regular file.')
     if before.st_size>MAX_PDF_BYTES:raise ValueError('Installed PDF exceeds 5 MB.')
     with os.fdopen(open_read(path),'rb') as stream:
         opened=os.fstat(stream.fileno())
-        if not opened_matches_path(before,opened):raise ValueError('Installed PDF identity changed while reading.')
+        if not stat.S_ISREG(opened.st_mode) or not opened_matches_path(before,opened):raise ValueError('Installed PDF identity changed while reading.')
         raw=stream.read(MAX_PDF_BYTES+1)
         if identity(opened)!=identity(os.fstat(stream.fileno())):raise ValueError('Installed PDF changed while reading.')
     if identity(before)!=identity(path.stat()) or hashlib.sha256(raw).hexdigest()!=manual['sha256']:

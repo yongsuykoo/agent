@@ -3,8 +3,10 @@ import json
 from email.message import Message
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import Mock,patch
 from app_agent.catalog import Catalog
 from app_agent.document_checks import operation
@@ -59,6 +61,24 @@ class PdfDocumentsTests(unittest.TestCase):
     def test_parser_invalid_output_cannot_become_evidence(self):
         with patch('app_agent.pdf_documents.subprocess.run',return_value=Mock(returncode=0,stdout=b'{"result":{"text":"fake"}}')):
             with self.assertRaisesRegex(RuntimeError,'invalid evidence'):extract_pdf(manual_pdf())
+
+    def test_nested_worker_archive_can_load_pinned_parser_resource(self):
+        import app_agent
+        package=Path(app_agent.__file__).parent
+        with tempfile.TemporaryDirectory() as folder:
+            wheel=Path(folder)/'app_agent_fixture.whl'
+            with zipfile.ZipFile(wheel,'w',zipfile.ZIP_DEFLATED) as archive:
+                for name in ('__init__.py','pdf_documents.py','_pdf_worker.py','vendor/pypdf.whl'):
+                    archive.write(package/name,'app_agent/'+name)
+            script="import sys,json;sys.path.insert(0,sys.argv[1]);import app_agent;assert app_agent.__file__.startswith(sys.argv[1]);from app_agent.pdf_documents import extract_pdf;print(json.dumps(extract_pdf(sys.stdin.buffer.read())))"
+            result=subprocess.run([sys.executable,'-I','-c',script,str(wheel)],input=manual_pdf(),capture_output=True,timeout=15)
+            self.assertEqual(result.returncode,0,result.stderr.decode(errors='replace'))
+            self.assertEqual(json.loads(result.stdout)['pages_read'],2)
+
+    def test_modified_parser_is_rejected_before_launch(self):
+        with patch('app_agent.pdf_documents.PARSER_SHA256','0'*64),patch('app_agent.pdf_documents.subprocess.run') as run:
+            with self.assertRaisesRegex(RuntimeError,'checksum mismatch'):extract_pdf(manual_pdf())
+            run.assert_not_called()
 
     def test_public_pdf_retrieval_keeps_byte_hash_and_final_url(self):
         raw=manual_pdf();headers=Message();headers['Content-Type']='application/pdf'

@@ -128,6 +128,8 @@ def inspect_installation(app, previous=None, deadline_seconds=1.0):
                         elif child.name.casefold() not in SKIP_DIRS:
                             evidence['complete'] = False
                         continue
+                    if not child.is_file(follow_symlinks=False):
+                        continue
                     extension = path.suffix.lower()
                     kind = ('binary' if extension in ('.exe', '.dll') else
                             'manifest' if extension in ('.manifest', '.config') or path.name.casefold() in ('package.json', 'appxmanifest.xml', 'pyproject.toml') else
