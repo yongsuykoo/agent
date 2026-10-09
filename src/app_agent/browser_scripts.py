@@ -4,6 +4,7 @@ DOM_TOOLS_VERSION='semantic-dom-3'
 OBSERVE=r'''(() => {
  const state=globalThis.__appAgent ||= {ids:new WeakMap(),nodes:new Map(),next:2};
  state.nodes.clear();
+ const labelNodes=new Set();
  const identify=el=>{if(!state.ids.has(el))state.ids.set(el,state.next++);return state.ids.get(el);};
  const parent=el=>el.assignedSlot || el.parentElement || el.getRootNode().host || el.ownerDocument.defaultView?.frameElement;
  const ancestor=(el,selector)=>{for(let node=el,depth=0;node && depth++<64;node=parent(node))if(node.matches(selector))return true;return false;};
@@ -38,7 +39,9 @@ OBSERVE=r'''(() => {
  const describe=(el,id) => {
   const tag=el.tagName.toLowerCase(),kind=(el.type||'').toLowerCase(),role=el.getAttribute('role')||'';
   const password=tag==='input' && (kind==='password' || /password|one.time|verification.code/i.test(el.autocomplete||''));
-  const referenced=(el.getAttribute('aria-labelledby')||'').trim().split(/\s+/).slice(0,5).map(id=>el.getRootNode().getElementById?.(id)).filter(node=>node && visible(node)).map(node=>node.innerText.slice(0,300)).join(' ');
+  const references=(el.getAttribute('aria-labelledby')||'').trim().split(/\s+/).slice(0,5).map(id=>el.getRootNode().getElementById?.(id)).filter(node=>node && visible(node));
+  for(const node of references)labelNodes.add(node);
+  const referenced=references.map(node=>(node.innerText||'').slice(0,300)).join(' ');
   const name=(el.getAttribute('aria-label') || referenced || Array.from(el.labels||[]).map(l=>l.innerText).join(' ') || (el.hasAttribute('contenteditable')?el.id:el.innerText) || el.getAttribute('placeholder') || el.name || el.id || tag).trim().slice(0,300);
   const enabled=!el.disabled && !el.matches(':disabled') && !ancestor(el,'[inert],[aria-disabled=true]');
   let actions=[],details={context:context(el)},type='Custom';
@@ -69,13 +72,19 @@ OBSERVE=r'''(() => {
  const controls=[{id:0,name:'Browser page',type:'Window',automation_id:'',enabled:true,visible:true,actions:[],value:'',password:false,state:{}},
  {id:1,name:(document.body?.innerText||'').slice(0,16000),type:'Text',automation_id:'page:text',enabled:true,visible:true,actions:[],value:'',password:false,state:{}}];
  const coverage={elements:0,roots:0,frames_unavailable:0,frames_loading:0,limited:false};
+ const snapshot=()=>{
+  const labelOutput=el=>{for(let node=el,depth=0;node && depth++<64;node=parent(node))if(labelNodes.has(node))return true;return false;};
+  const filtered=controls.filter(c=>c.automation_id!=='page:output' || !labelOutput(state.nodes.get(c.id)));
+  for(const c of controls)if(!filtered.includes(c))state.nodes.delete(c.id);
+  return {title:document.title,url:location.href,controls:filtered,coverage};
+ };
  const roots=[{root:document,depth:0}];let interactive=0,outputs=0;
  while(roots.length){
   const entry=roots.pop();if(coverage.roots>=64){coverage.limited=true;break;}coverage.roots++;
   const walker=(entry.root.ownerDocument || document).createTreeWalker(entry.root,1);
   while(walker.nextNode()){
    const el=walker.currentNode;
-   if(coverage.elements>=8000){coverage.limited=true;return {title:document.title,url:location.href,controls,coverage};}coverage.elements++;
+   if(coverage.elements>=8000){coverage.limited=true;return snapshot();}coverage.elements++;
    if(entry.depth<16 && roots.length<64){
     if(el.shadowRoot)roots.push({root:el.shadowRoot,depth:entry.depth+1});
     if(el.tagName==='IFRAME'){
@@ -104,7 +113,7 @@ OBSERVE=r'''(() => {
    }
   }
  }
- return {title:document.title,url:location.href,controls,coverage};
+ return snapshot();
 })()'''
 
 ACT=r'''(payload => {

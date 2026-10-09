@@ -16,12 +16,13 @@ FORM='''<div contenteditable="true" role="textbox" aria-label="Draft"><p>Old <b>
 <div role="switch" tabindex="0" aria-label="Confirmed" aria-checked="false">Confirm</div>
 <div role="tablist"><div role="tab" tabindex="0" aria-label="Write" aria-selected="true">Write</div><div role="tab" tabindex="0" aria-label="Review" aria-selected="false">Review</div></div>
 <div role="button" tabindex="0" aria-label="Pinned" aria-pressed="false">Pin</div>
-<span id="choice-label">First choice</span><div role="radio" tabindex="0" aria-labelledby="choice-label" aria-checked="false">First</div>
+<div id="choice-label"><span>First choice</span></div><div role="radio" tabindex="0" aria-labelledby="choice-label" aria-checked="false">First</div>
 <div role="menuitem" tabindex="0" aria-label="Preview">Preview</div>
 <div role="option" tabindex="0" aria-label="Custom option" aria-selected="false">Option</div>
 <div contenteditable="true" aria-readonly="true" aria-label="Locked draft">Locked</div>
 <div contenteditable="true" aria-label="Embedded widget"><span contenteditable="false">Protected widget</span></div>
 <div contenteditable="true" aria-label="Image document"><img alt="Image" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></div>
+<div contenteditable="true" aria-label="Password widget"><input type="password" aria-label="Protected secret" value="semantic-password-must-stay-private"></div>
 <div role="textbox" aria-label="Declared only">Cannot edit me</div>
 <div role="switch" aria-label="Unknown switch">Unknown</div><div role="checkbox" aria-label="Mixed checkbox" aria-checked="mixed">Mixed</div>
 <div aria-disabled="true"><div role="tab" aria-label="Disabled tab" aria-selected="false">Disabled</div></div>
@@ -84,15 +85,19 @@ def checks(root,fixture,factory,cancel,emit):
             if current['value']!=text or browser.evaluate("document.querySelector('#host').shadowRoot.querySelector('[aria-label=Draft]').querySelectorAll('img').length")!=0:raise RuntimeError('Rich-text typing interpreted markup or lost literal text.')
             if browser.transport.call('Runtime.evaluate',{'expression':'window.effects.inputs','returnByValue':True})['result']['value']!=1:raise RuntimeError('Rich editor did not notify the application exactly once.')
             if result_matches(browser.observe(),text,result_control_id='page:output'):raise RuntimeError('Unsaved editable content certified a task result.')
+            if result_matches(browser.observe(),'First choice',result_control_id='page:output'):raise RuntimeError('A referenced radio label certified completion.')
             browser.act({'kind':'type','target':current['id'],'text':''})
             if controls(browser)['Draft']['value']!='':raise RuntimeError('Empty replacement failed to clear the rich editor.')
-            return {'literal_markup_preserved':True,'application_input_event':True,'exact_empty_replacement':True,'unsaved_editor_not_proof':True}
+            browser.evaluate("document.execCommand('undo')")
+            if controls(browser)['Draft']['value']!=text:raise RuntimeError('Browser editing undo did not restore the literal draft.')
+            return {'literal_markup_preserved':True,'application_input_event':True,'exact_empty_replacement':True,'browser_undo_preserved':True,'unsaved_editor_not_proof':True,'referenced_label_not_proof':True}
         finally:browser.close()
     def protections():
         browser=opened()
         try:
             before=len(fixture.commits);original=browser.observe();named={c['name']:c for c in original['controls']}
-            for name,kind in [('Locked draft','type'),('Embedded widget','type'),('Image document','type'),('Declared only','type'),('Unknown switch','toggle'),('Mixed checkbox','toggle'),('Disabled tab','click')]:
+            if 'semantic-password-must-stay-private' in json.dumps(original):raise RuntimeError('Unsupported editor exported a password widget value.')
+            for name,kind in [('Locked draft','type'),('Embedded widget','type'),('Image document','type'),('Password widget','type'),('Declared only','type'),('Unknown switch','toggle'),('Mixed checkbox','toggle'),('Disabled tab','click')]:
                 if named[name]['actions']:raise RuntimeError('Unavailable semantic control advertised: '+name)
                 try:browser.act({'kind':kind,'target':named[name]['id'],'text':'Do not edit','state':'on'})
                 except ValueError:pass
