@@ -77,7 +77,7 @@ def document_smoke(directory,emit=print,cancel=None):
         try:validate_extraction(operation(page=99),[doc])
         except ValueError:return {'unread_page_rejected':True,'page_hash_citation_verified':True}
         raise RuntimeError('Uninspected PDF page accepted as evidence.')
-    def seed(name,pages):
+    def seed(name,pages,initial=True):
         from .learning import ensure_blueprint
         from .research import CloudResearcher
         folder=root/name;folder.mkdir();(folder/'manual.pdf').write_bytes(manual_pdf(pages))
@@ -88,8 +88,11 @@ def document_smoke(directory,emit=print,cancel=None):
             def request(self,**payload):
                 self.calls+=1;data=json.loads(payload['input'])
                 if self.callback:self.callback()
-                return {'output':[{'content':[{'type':'output_text','text':json.dumps(operation(data['documents'][0]['pages'][0]['page']))}]}]}
-        cloud=FixtureCloud();ensure_blueprint(catalog,catalog.get(app['id']),cloud,lambda _:None)
+                doc=data['documents'][0]
+                result=operation(doc['pages'][0]['page']) if 'Type Hello' in doc['text'] else {'capabilities':[],'limitations':[]}
+                return {'output':[{'content':[{'type':'output_text','text':json.dumps(result)}]}]}
+        cloud=FixtureCloud()
+        if initial:ensure_blueprint(catalog,catalog.get(app['id']),cloud,lambda _:None)
         return catalog,catalog.get(app['id']),cloud
     def continuation():
         from .manual_study import continue_manual
@@ -154,13 +157,43 @@ def document_smoke(directory,emit=print,cancel=None):
                 raise RuntimeError('Version update accepted stale manual findings.')
             return {'cancelled_checkpoint_unchanged':True,'concurrent_lease_winners':1,'dead_process_recovered':True,'updated_generation_rejected':True}
         finally:catalog.close()
+    def bootstrap():
+        from .manual_study import continue_manual,draft_key
+        catalog,app,cloud=seed('new-app-front-matter',['Copyright and contents.']*32+['']*32+['Type Hello.']*6,initial=False)
+        try:
+            first=continue_manual(catalog,cloud,lambda _:None)
+            if first['blueprint_ready'] or catalog.learning_overview()['apps_documented'] or catalog.next_research() is not None:
+                raise RuntimeError('Front matter falsely established an app blueprint or duplicated initial study.')
+            directory=catalog.data_dir;catalog.close();catalog=Catalog(directory)
+            if len(catalog.setting(draft_key(app))['sources'])!=1:raise RuntimeError('Draft evidence failed to survive restart.')
+            calls=cloud.calls;middle=continue_manual(catalog,cloud,lambda _:None)
+            if middle['blueprint_ready'] or cloud.calls!=calls:raise RuntimeError('Blank opening section established operations or charged a provider call.')
+            last=continue_manual(catalog,cloud,lambda _:None);blueprint=catalog.get(app['id'])['blueprint']
+            if not last['blueprint_ready'] or not last['reading_complete'] or [s['read_cursor']['page'] for s in blueprint['sources']]!=[1,33,65] or blueprint['capabilities'][0]['source_pages'][0]['page']!=65 or catalog.coverage(app['id'],1)[0]['observed_runs']:
+                raise RuntimeError('New-app study failed to find later instructions with retained provenance.')
+            return {'new_app_studied_without_blueprint':True,'front_matter_draft_resumed':True,'blank_opening_provider_calls':0,
+                'first_operation_cited_page':65,'reading_complete':True,'execution_verified':False,'simulated_provider_responses':True}
+        finally:catalog.close()
+    def no_operation():
+        from .manual_study import continue_manual,draft_key
+        catalog,app,cloud=seed('no-operating-instructions',['Copyright only.']*40,initial=False)
+        try:
+            continue_manual(catalog,cloud,lambda _:None);last=continue_manual(catalog,cloud,lambda _:None)
+            if not last['reading_complete'] or last['blueprint_ready'] or catalog.get(app['id'])['blueprint'] is not None or catalog.next_research()['id']!=app['id'] or not catalog.setting(draft_key(app))['limitations']:
+                raise RuntimeError('An exhausted non-operational manual claimed understanding or prevented alternative research.')
+            calls=cloud.calls
+            if continue_manual(catalog,cloud,lambda _:None)['status']!='no_pending_manual' or cloud.calls!=calls:
+                raise RuntimeError('Exhausted manual was read repeatedly.')
+            return {'exhausted_manual_without_false_blueprint':True,'alternative_research_queued':True,'draft_gaps_retained':True,'repeated_provider_calls':0}
+        finally:catalog.close()
     checks=[('Compressed PDF pages and hashes',compressed),('Unicode PDF font mappings',unicode_text),
         ('Partial reading retains coverage gaps',coverage),('Malformed and scanned-only manuals do not establish evidence',lambda:(rejected(b'%PDF-1.4\nbroken'),rejected(manual_pdf([''])))),
         ('Encrypted manuals require no passwords and are rejected',lambda:rejected(manual_pdf(encrypted=True))),
         ('Compressed oversized page is rejected',lambda:rejected(manual_pdf(['A'*8_100_000]))),
         ('Installed PDF study, caching and update adaptation',local_study),('Uninspected PDF pages cannot be cited',citations),
         ('Full installed manual resumes after restart',continuation),('Long PDF page retains every character range',long_page),
-        ('Empty sections retain gaps and continue without model calls',empty_section),('Cancelled concurrent and updated manual checkpoints are fenced',fences)]
+        ('Empty sections retain gaps and continue without model calls',empty_section),('Cancelled concurrent and updated manual checkpoints are fenced',fences),
+        ('New app studies beyond front matter before its first blueprint',bootstrap),('Exhausted manual queues alternative research without inventing operations',no_operation)]
     emit('Document tests use owned PDF fixtures only; no provider key, network or desktop interaction.')
     return run_checks(checks,root/'report.json',cancel,emit,
         scope='Bounded owned PDF/manual learning checks. Documented operations remain execution-unverified; no all-app certification.')

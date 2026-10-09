@@ -171,6 +171,16 @@ class Catalog:
         with self.db:
             cursor = self.db.execute("UPDATE apps SET blueprint=?,status='documented',error=NULL,attempts=0,retry_at=NULL WHERE id=? AND generation=? AND present=1", (json.dumps(blueprint), identity, generation))
             if cursor.rowcount:
+                # The UPDATE above holds the writer transaction before reading
+                # a concurrent first-manual draft. Other sources must retain
+                # those completed sections and explicit knowledge gaps too.
+                draft_key=f'pdf-bootstrap:{identity}:{generation}'
+                draft=self.setting(draft_key,None)
+                if draft and blueprint.get('capabilities'):
+                    from .learning import merge_blueprints
+                    blueprint,_=merge_blueprints(draft,blueprint)
+                    self.db.execute('UPDATE apps SET blueprint=? WHERE id=? AND generation=? AND present=1',(json.dumps(blueprint),identity,generation))
+                    self.db.execute('DELETE FROM settings WHERE key=?',(draft_key,))
                 from .pdf_documents import acknowledge_sources
                 acknowledge_sources(self,{'id':identity,'generation':generation},blueprint.get('sources',[]))
                 self.dirty_knowledge()
@@ -337,7 +347,7 @@ class Catalog:
 
     def learning_overview(self):
         apps = self.apps()
-        summary = {"apps_detected": len(apps), "apps_documented": 0, "apps_queued": 0, "apps_research_deferred": 0, "apps_researching": 0,
+        summary = {"apps_detected": len(apps), "apps_documented": 0, "apps_queued": 0, "apps_research_deferred": 0, "apps_researching": 0, "apps_reading_manuals": 0,
                    "documented_capabilities": 0, "capabilities_tested_once": 0, "capabilities_tested_repeatedly": 0,
                    "capabilities_visually_assessed": 0, "capabilities_without_observed_test": 0, "experiments_ready": 0,
                    "experiments_deferred": 0, "initial_documentation_complete": False, "documentation_rounds": 0}
@@ -346,6 +356,7 @@ class Catalog:
             summary["apps_queued"] += app["status"] == "queued"
             summary["apps_research_deferred"] += app["status"] == "research_failed"
             summary["apps_researching"] += app["status"] == "researching"
+            summary["apps_reading_manuals"] += app["status"] == "manual_reading"
             if app["blueprint"]:
                 summary["documentation_rounds"] += self.setting(f"documentation:{app['id']}:{app['generation']}", {}).get("rounds", 1)
             coverage = self.coverage(app["id"], app["generation"])

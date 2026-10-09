@@ -203,7 +203,10 @@ def research_context(catalog, app):
     documents=[]
     for manual in evidence.get('manuals',[]):
         if manual.get('format')=='pdf':
-            from .pdf_documents import installed_pdf
+            from .pdf_documents import installed_pdf,progress_key
+            if not app.get('blueprint') and catalog.setting(progress_key(app,manual),{}).get('complete'):
+                context['installation'].setdefault('manual_gaps',[]).append('An installed PDF was fully inspected without an operating procedure; seek alternative documentation.')
+                continue
             try:documents.append(installed_pdf(catalog,app,evidence,manual))
             except (OSError,ValueError,RuntimeError) as error:
                 context['installation'].setdefault('manual_gaps',[]).append(str(error)[:300])

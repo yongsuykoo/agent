@@ -14,7 +14,7 @@ from app_agent.document_fixtures import manual_pdf
 from app_agent.learning import ensure_blueprint,merge_blueprints
 from app_agent.local_inspection import inspect_installation
 from app_agent.machine import machine_report,research_context
-from app_agent.manual_study import claim,continue_manual,release
+from app_agent.manual_study import claim,continue_manual,release,draft_key
 from app_agent.pdf_documents import extract_pdf,progress_key
 from app_agent.research import CloudResearcher,validate_extraction
 
@@ -181,6 +181,137 @@ class ManualContinuationTests(unittest.TestCase):
             for cursor in ({},{'page':0,'offset':0},{'page':1,'offset':-1},{'page':True,'offset':0}):
                 with self.assertRaises(ValueError):extract_pdf(manual_pdf(),cursor)
             launch.assert_not_called()
+
+    def reset_manual(self,pages):
+        self.path.write_bytes(manual_pdf(pages));self.sync()
+
+    def test_new_app_passes_blank_opening_sections_without_provider_or_false_blueprint(self):
+        self.reset_manual(['']*64+['Type Hello.'])
+        for page in (33,65):
+            result=continue_manual(self.catalog,self.cloud,lambda _:None)
+            self.assertFalse(result['blueprint_ready'])
+            self.assertIsNone(self.catalog.get(self.app['id'])['blueprint'])
+            self.assertEqual(self.catalog.setting(progress_key(self.current,self.manual))['cursor'],{'page':page,'offset':0})
+        self.assertEqual(self.cloud.calls,[])
+        self.assertIsNone(self.catalog.setting('research_budget',None))
+        result=continue_manual(self.catalog,self.cloud,lambda _:None)
+        self.assertTrue(result['blueprint_ready']);self.assertTrue(result['reading_complete'])
+        blueprint=self.catalog.get(self.app['id'])['blueprint']
+        self.assertEqual([s['read_cursor']['page'] for s in blueprint['sources']],[1,33,65])
+        self.assertEqual(blueprint['capabilities'][0]['source_pages'][0]['page'],65)
+        self.assertEqual(self.catalog.learning_overview()['capabilities_tested_once'],0)
+
+    def test_textual_front_matter_survives_restart_without_becoming_app_understanding(self):
+        self.reset_manual(['Copyright and contents.']*32+['Type Hello.'])
+        cloud=SectionCloud(empty=True)
+        self.assertFalse(continue_manual(self.catalog,cloud,lambda _:None)['blueprint_ready'])
+        self.assertEqual(self.catalog.learning_overview()['apps_documented'],0)
+        self.assertEqual(self.catalog.learning_overview()['apps_reading_manuals'],1)
+        self.assertIsNone(self.catalog.next_research())
+        self.catalog.close();self.catalog=Catalog(self.root/'data')
+        self.assertEqual(len(self.catalog.setting(draft_key(self.current))['sources']),1)
+        cloud.empty=False
+        self.assertTrue(continue_manual(self.catalog,cloud,lambda _:None)['blueprint_ready'])
+        blueprint=self.catalog.get(self.app['id'])['blueprint']
+        self.assertEqual(len(blueprint['sources']),2)
+        self.assertEqual(blueprint['capabilities'][0]['source_pages'][0]['page'],33)
+        self.assertIsNone(self.catalog.setting(draft_key(self.current),None))
+
+    def test_exhausted_manual_with_no_operation_queues_other_research_and_retains_gap(self):
+        self.reset_manual(['Copyright only.'])
+        result=continue_manual(self.catalog,SectionCloud(empty=True),lambda _:None)
+        self.assertTrue(result['reading_complete']);self.assertFalse(result['blueprint_ready'])
+        self.assertEqual(self.catalog.next_research()['id'],self.app['id'])
+        self.assertIsNone(self.catalog.get(self.app['id'])['blueprint'])
+        self.assertTrue(self.catalog.setting(draft_key(self.current))['limitations'])
+        self.assertEqual(continue_manual(self.catalog,self.cloud,lambda _:None)['status'],'no_pending_manual')
+        self.assertTrue(self.catalog.claim_research(self.current['id'],self.current['generation']))
+
+    def test_alternative_source_keeps_draft_evidence_without_reinterpreting_exhausted_pdf(self):
+        self.reset_manual(['Copyright only.'])
+        continue_manual(self.catalog,SectionCloud(empty=True),lambda _:None)
+        current=self.catalog.get(self.app['id'])
+        with patch('app_agent.pdf_documents.installed_pdf',side_effect=AssertionError('Exhausted section reopened')):
+            context,documents=research_context(self.catalog,current)
+        self.assertEqual(documents,[]);self.assertTrue(context['installation']['manual_gaps'])
+        blueprint={'name':self.app['name'],'capabilities':[{'name':'Open document'}],
+            'sources':[{'url':'fixture:alternative-manual'}],'limitations':[]}
+        self.assertTrue(self.catalog.save_blueprint(current['id'],current['generation'],blueprint))
+        saved=self.catalog.get(self.app['id'])['blueprint']
+        self.assertEqual(len(saved['sources']),2);self.assertTrue(saved['limitations'])
+        self.assertIsNone(self.catalog.setting(draft_key(current),None))
+
+    def test_campaign_does_not_duplicate_initial_research_while_manual_bootstraps(self):
+        self.reset_manual(['Copyright only.']*32+['Type Hello.'])
+        cloud=SectionCloud(empty=True)
+        with patch.object(cloud,'find_sources',side_effect=AssertionError('Unexpected initial web search')):
+            report=study_campaign(self.catalog,cloud,lambda _:None,daily_limit=0,max_apps=2,max_plans=0)
+        self.assertEqual(report['research'][0]['status'],'manual_progress')
+        self.assertEqual(len(cloud.calls),1)
+        self.assertFalse(self.catalog.claim_research(self.current['id'],self.current['generation']))
+        self.assertIsNone(self.catalog.get(self.app['id'])['blueprint'])
+
+    def test_bootstrap_cancelled_merge_keeps_draft_and_cursor_atomic(self):
+        stop=threading.Event();original=merge_blueprints
+        def merge(*args):
+            result=original(*args);stop.set();return result
+        with patch('app_agent.manual_study.merge_blueprints',side_effect=merge):
+            result=continue_manual(self.catalog,self.cloud,lambda _:None,cancel=stop)
+        self.assertEqual(result['status'],'cancelled')
+        self.assertIsNone(self.catalog.get(self.app['id'])['blueprint'])
+        self.assertIsNone(self.catalog.setting(draft_key(self.current),None))
+        self.assertEqual(self.catalog.setting(progress_key(self.current,self.manual)).get('cursor',{'page':1,'offset':0}),{'page':1,'offset':0})
+        stop.clear()
+        self.assertTrue(continue_manual(self.catalog,self.cloud,lambda _:None,cancel=stop)['blueprint_ready'])
+
+    def test_bootstrap_failure_defers_exact_section_and_allows_alternative_research(self):
+        cloud=SectionCloud(callback=lambda:(_ for _ in ()).throw(RuntimeError('Unreadable provider result')))
+        self.assertEqual(continue_manual(self.catalog,cloud,lambda _:None)['status'],'manual_deferred')
+        self.assertEqual(continue_manual(self.catalog,cloud,lambda _:None)['status'],'no_pending_manual')
+        self.assertIsNone(self.catalog.get(self.app['id'])['blueprint'])
+        self.assertEqual(self.catalog.next_research()['id'],self.app['id'])
+        key=progress_key(self.current,self.manual);state=self.catalog.setting(key)
+        self.assertNotIn('cursor',state);self.assertEqual(len(cloud.calls),1)
+        state['retry_at']=0;self.catalog.set_setting(key,state)
+        self.assertTrue(continue_manual(self.catalog,self.cloud,lambda _:None)['blueprint_ready'])
+
+    def test_two_manuals_finishing_in_reverse_order_preserve_both_sources(self):
+        (self.install/'second-manual.pdf').write_bytes(manual_pdf(['Type Hello.']))
+        self.sync()
+        cloud=SectionCloud(callback=lambda:continue_manual(self.catalog,self.cloud,lambda _:None))
+        result=continue_manual(self.catalog,cloud,lambda _:None)
+        self.assertTrue(result['blueprint_ready'])
+        blueprint=self.catalog.get(self.app['id'])['blueprint']
+        self.assertEqual(len(blueprint['sources']),2)
+        self.assertEqual(len(set(s['url'] for s in blueprint['sources'])),2)
+        self.assertEqual(len(blueprint['capabilities'][0]['source_pages']),2)
+
+    def test_failed_manual_does_not_release_another_active_bootstrap_to_initial_research(self):
+        (self.install/'second-manual.pdf').write_bytes(manual_pdf(['Type Hello.']))
+        self.sync();manuals=self.catalog.local_evidence(self.current['id'],self.current['generation'])['manuals']
+        first=claim(self.catalog,self.current,manuals[0]);second=claim(self.catalog,self.current,manuals[1])
+        self.assertIsNotNone(first);self.assertIsNotNone(second)
+        release(self.catalog,progress_key(self.current,manuals[0]),first,RuntimeError('Read failed'),self.current)
+        self.assertFalse(self.catalog.claim_research(self.current['id'],self.current['generation']))
+        release(self.catalog,progress_key(self.current,manuals[1]),second,RuntimeError('Read failed'),self.current)
+        self.assertTrue(self.catalog.claim_research(self.current['id'],self.current['generation']))
+
+    def test_bootstrap_respects_existing_initial_research_owner(self):
+        self.assertTrue(self.catalog.claim_research(self.current['id'],self.current['generation']))
+        self.assertIsNone(claim(self.catalog,self.current,self.manual))
+        self.assertEqual(continue_manual(self.catalog,self.cloud,lambda _:None)['status'],'no_pending_manual')
+        self.assertEqual(self.cloud.calls,[])
+
+    def test_app_update_during_bootstrap_cannot_publish_or_reuse_old_draft(self):
+        self.reset_manual(['Copyright only.']*32+['Type Hello.'])
+        continue_manual(self.catalog,SectionCloud(empty=True),lambda _:None)
+        old=self.current.copy()
+        cloud=SectionCloud(callback=lambda:self.sync(version='2'))
+        self.assertEqual(continue_manual(self.catalog,cloud,lambda _:None)['status'],'app_changed')
+        self.assertIsNone(self.catalog.get(self.app['id'])['blueprint'])
+        self.assertIsNone(self.catalog.setting(draft_key(self.current),None))
+        self.assertEqual(len(self.catalog.setting(draft_key(old))['sources']),1)
+        self.assertEqual(self.catalog.setting(progress_key(old,self.manual))['cursor'],{'page':33,'offset':0})
 
 
 if __name__=='__main__':unittest.main()
