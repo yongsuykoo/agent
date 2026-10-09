@@ -114,6 +114,22 @@ class TransportTests(unittest.TestCase):
         events=[];self.client.events=events.append
         self.peer.sendall(self.frame({'method':'Fetch.requestPaused','params':{}})+self.frame({'id':1,'result':{'ok':True}}))
         self.assertEqual(self.client.call('Runtime.enable'),{'ok':True});self.assertEqual(events[0]['method'],'Fetch.requestPaused')
+    def test_startup_handshake_waits_for_readiness_with_absolute_deadline(self):
+        import base64,hashlib
+        nonce=b'A'*16;key=base64.b64encode(nonce).decode()
+        accepted=base64.b64encode(hashlib.sha1((key+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode()).digest()).decode()
+        response=('HTTP/1.1 101 Switching Protocols\r\nSec-WebSocket-Accept: '+accepted+'\r\n\r\n').encode()
+        for delay in (6,16):
+            connection=Mock();connection.recv.return_value=response
+            with self.subTest(delay=delay),patch('app_agent.browser_protocol.socket.create_connection',return_value=connection),patch('app_agent.browser_protocol.os.urandom',return_value=nonce),patch('app_agent.browser_protocol.time.monotonic',side_effect=[0,delay]):
+                if delay==6:
+                    client=DevTools('ws://127.0.0.1:99/devtools/browser/owned',99);client.close()
+                    connection.recv.assert_called_once()
+                else:
+                    with self.assertRaisesRegex(TimeoutError,'startup handshake.*before task commands'):
+                        DevTools('ws://127.0.0.1:99/devtools/browser/owned',99)
+                    connection.recv.assert_not_called()
+                connection.close.assert_called_once()
     def test_fragmented_json_and_ping_are_supported(self):
         self.peer.sendall(self.frame(b'{"result":',final=False)+self.frame(b'ping',opcode=9)+self.frame(b'42}',opcode=0))
         self.assertEqual(self.client._message(__import__('time').monotonic()+1),{'result':42})

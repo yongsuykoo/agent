@@ -21,10 +21,16 @@ class DevTools:
         try:
             key=base64.b64encode(os.urandom(16)).decode()
             request=f'GET {parsed.path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: {key}\r\n\r\n'
-            self.socket.sendall(request.encode());deadline=time.monotonic()+5
-            while b'\r\n\r\n' not in self.buffer:
-                self._receive(deadline)
-                if len(self.buffer)>16384:raise ValueError('Oversized browser handshake.')
+            # A Windows browser can publish its endpoint before its HTTP upgrade
+            # handler is ready. Wait within the startup readiness allowance;
+            # this negotiation sends no task commands or application actions.
+            self.socket.sendall(request.encode());deadline=time.monotonic()+15
+            try:
+                while b'\r\n\r\n' not in self.buffer:
+                    self._receive(deadline)
+                    if len(self.buffer)>16384:raise ValueError('Oversized browser handshake.')
+            except TimeoutError as error:
+                raise TimeoutError('Browser startup handshake timed out before task commands were sent.') from error
             headers,self.buffer=self.buffer.split(b'\r\n\r\n',1)
             lines=headers.decode('ascii').split('\r\n');fields=dict(line.split(':',1) for line in lines[1:])
             fields={k.lower():v.strip() for k,v in fields.items()}
