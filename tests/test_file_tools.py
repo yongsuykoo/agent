@@ -167,6 +167,11 @@ class ArtifactTests(FileFixture):
                 with path.open('r+b') as stream:stream.write(b'changed!')
         # POSIX detects changed metadata; Windows denies the overlapping writer.
         with self.assertRaises((ValueError,PermissionError)):list(read_chunks(path,guard))
+        self.assertTrue(changed)  # The read must reach its guard, not fail to open.
+        if os.name=='nt':
+            self.assertEqual(path.read_bytes()[:8],bytes(range(8)))
+            with path.open('r+b') as stream:stream.write(b'changed!')
+            self.assertEqual(path.read_bytes()[:8],b'changed!')  # The read releases its write exclusion.
     def test_new_source_entry_during_copy_prevents_success(self):
         request=self.request();manifest=inventory(self.source,'copy_folder');original=read_chunks;changed=False
         def altered(path,guard):
