@@ -265,7 +265,8 @@ class InterfaceFlowTests(unittest.TestCase):
                 pump()
                 self.close()
         pending = []
-        self.test_startup_discovery_auto_route_research_and_memory(root=DeferredRoot(), background_launcher=pending.append)
+        with patch.object(ui,'time',Mock(monotonic=Mock(return_value=1))):
+            self.test_startup_discovery_auto_route_research_and_memory(root=DeferredRoot(), background_launcher=pending.append)
         self.assertEqual(len(pending), 1)
 
     def test_learn_all_button_starts_persistent_campaign_without_task_commands(self):

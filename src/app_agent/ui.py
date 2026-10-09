@@ -1040,7 +1040,7 @@ def _launch(data_dir):
                 pass
             elif state["practice_pending"] and not state["learning_paused"]:
                 background_practice()
-            elif auto_learn.get() and not state["learning_paused"] and not state["research_busy"] and time.monotonic() - state["last_learning"] > 60 and (os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")):
+            elif auto_learn.get() and not state["learning_paused"] and not state["research_busy"] and (not state["last_learning"] or time.monotonic() - state["last_learning"] > 60) and (os.getenv("AGENT_API_KEY") or os.getenv("OPENAI_API_KEY")):
                 try:
                     daily_limit = learning_limit.get()
                     if daily_limit < 0:

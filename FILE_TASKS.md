@@ -1,4 +1,4 @@
-# Native file tools — 0.14.0
+# Native file tools — updated in 0.17.0
 
 The agent can use fixed local filesystem operations for file copying and ZIP creation. It interprets explicit paths, inventories the requested source, creates an exclusive new destination, and independently verifies the saved bytes. It needs neither a provider call nor a File Explorer window for these tasks.
 
@@ -21,6 +21,8 @@ Autonomous mode permits the exact submitted operation. Supervised mode presents 
 Relative paths, missing source/parent paths, device/network paths, alternate streams, reserved Windows names, links/junctions/reparse points, unsupported special files and a destination inside the source are rejected. Each task supports up to 4,096 entries and 2 GiB of source bytes, streamed in bounded chunks. These are operation bounds, not a daily budget; no daily file-task cap is added. More general file selection, move/delete, existing destination merging, encrypted archives and extraction remain additional work.
 
 ## Verification and recovery
+
+Windows file reads now exclude overlapping writers/deleters until the handle closes. Path and opened-handle identity use compatible fields across Python versions, with separate before/after timestamp checks for each. An already open incompatible writer defers the read. These bounded handles close after success, error or cancellation.
 
 The task records relative names, sizes and SHA-256 hashes. It hashes source data during transfer, checks that the source inventory/content still matches, then separately reads the output. Folder verification rejects missing/extra files or directories. ZIP verification reads every member and rejects changed bytes, incorrect sizes, duplicate/extra entries and encrypted entries. Output hashes become durable checkpoints only after these checks succeed.
 
