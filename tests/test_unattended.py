@@ -14,7 +14,9 @@ class UnattendedSessionTests(unittest.TestCase):
             self.assertEqual(session['deadline'],36100.0)
             self.assertEqual(store.start(1)['id'],session['id'])
             store.close()
-            resumed=Sessions(root,clock=lambda:clock[0]).current()
+            check=Sessions(root,clock=lambda:clock[0])
+            try:resumed=check.current()
+            finally:check.close()
             self.assertEqual(resumed['state'],'active');self.assertEqual(resumed['remaining_seconds'],36000.0)
 
     def test_expiry_fences_checkpoint(self):
@@ -23,7 +25,9 @@ class UnattendedSessionTests(unittest.TestCase):
             clock[0]=104.0
             token=SessionCancellation(root,session,wall=lambda:clock[0],monotonic=lambda:clock[0])
             self.assertTrue(token.is_set())
-            self.assertEqual(Sessions(root,clock=lambda:clock[0]).current()['state'],'elapsed')
+            check=Sessions(root,clock=lambda:clock[0])
+            try:self.assertEqual(check.current()['state'],'elapsed')
+            finally:check.close()
 
     def test_external_stop_cancels_without_replaying_actions(self):
         with tempfile.TemporaryDirectory() as root:
@@ -48,7 +52,9 @@ class UnattendedSessionTests(unittest.TestCase):
                 clock[0]+=2;return clock[0]
             watch_session(root,session['id'],spawn=spawn,cancel=stop,wall=lambda:clock[0],monotonic=monotonic)
             self.assertGreaterEqual(len(children),1)
-            self.assertEqual(Sessions(root,clock=lambda:clock[0]).current()['state'],'elapsed')
+            check=Sessions(root,clock=lambda:clock[0])
+            try:self.assertEqual(check.current()['state'],'elapsed')
+            finally:check.close()
 
     def test_start_session_refuses_paused_queue(self):
         with tempfile.TemporaryDirectory() as root:
