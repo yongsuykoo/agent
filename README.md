@@ -1,6 +1,6 @@
 # Personal Windows app agent
 
-Version **0.23.2** adds [bounded unattended sessions](UNATTENDED.md) on top of [durable online-PDF study](ONLINE_MANUALS.md): starting an unattended session now automatically arms read-only background study, while preserving the configured usage limit. The worker records a ten-hour deadline, resumes after restarts, retries worker failures with backoff, and lets study continue while Windows is locked. Discovery alone does not establish app understanding. Universal all-app mastery remains unfinished.
+Version **0.24.0** removes the mistakenly added ten-hour app timer and restores the ordinary [background worker](BACKGROUND_AGENT.md). Read-only discovery and enabled documentation study can progress while Windows is locked or the user is active. Desktop actions still wait for an available idle desktop. Release acceptance is being verified; universal all-app mastery remains unfinished.
 
 Version **0.19.0** adds [independent PDF manual learning](PDF_MANUALS.md): installed and public manuals, isolated bounded parsing, cached page evidence and validated page citations. Reading remains execution-unverified. Hosted Windows Python 3.11 and 3.14 each passed 531 regressions (two POSIX-only skips), eight document checks, 25 browser checks and four file checks. A fresh installed wheel passed all 533 regressions and those fixture checks. See [release validation](VALIDATION_019.md). Universal all-app operation, external-service planning and live voice reliability remain unfinished.
 

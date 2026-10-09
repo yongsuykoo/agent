@@ -1,6 +1,6 @@
 # Evidence for the personal-agent goal
 
-Version 0.23.0 adds bounded unattended sessions: up to ten hours with a durable deadline, worker restart watchdog, progress counters and restart-at-login recovery. Read-only study may continue while Windows is locked; desktop actions wait for an interactive unlocked desktop. See UNATTENDED.md. This reduces supervision but does not establish universal app mastery.
+Version 0.24.0 removes the 0.23.x ten-hour app feature added through a misunderstanding of the development request. The ordinary background worker has no session deadline. Read-only discovery and enabled study can progress while the desktop is locked or busy. Existing user settings, credentials and evidence are preserved. Universal mastery remains unfinished.
 
 Version 0.22.0 adds resumable public PDF snapshots to catalog-backed background research, with exact-byte/current-generation fencing, owned-thread persistence, source refresh and durable front-matter reading. All 576 regressions and sixteen document checks passed on each hosted Linux version. Both hosted Windows versions passed 574 regressions with two POSIX-only skips and all 45 document/browser/file checks. Fresh installed-wheel, signed-worker and real public HTTPS PDF/parser checks also passed. See ONLINE_MANUALS.md and VALIDATION_022.md. Universal mastery remains unfinished.
 

@@ -33,18 +33,21 @@ class ResidentTests(unittest.TestCase):
         try:return jobs.submit('A requested goal',autonomous=autonomous)
         finally:jobs.close()
     def state(self):return json.loads((Path(self.temp.name)/'worker-status.json').read_text())['state']
-    def test_paused_locked_busy_and_gui_sessions_do_not_dispatch_or_scan(self):
+    def test_locked_busy_and_gui_sessions_do_not_dispatch_and_pause_prevents_scans(self):
         self.job();self.available.return_value=False;self.worker.step();self.assertEqual(self.state(),'waiting_desktop')
         self.available.return_value=True;self.presence.return_value=True;self.worker.step();self.assertEqual(self.state(),'gui_open')
         self.presence.return_value=False;self.worker.idle=lambda:0;self.worker.step();self.assertEqual(self.state(),'waiting_idle')
         self.worker.stop();self.worker.cancel.clear();self.worker.step();self.assertEqual(self.state(),'queue_paused')
-        self.run.assert_not_called();self.scan.assert_not_called()
+        self.run.assert_not_called();self.scan.assert_called_once()
     def test_worker_executes_autonomous_jobs_only_and_checks_desktop_at_every_checkpoint(self):
         self.job(False);identity=self.job();self.run.return_value={'id':identity,'status':'completed'}
         self.worker.step();self.assertTrue(self.run.call_args.kwargs['autonomous_only']);self.scan.assert_called_once()
         permit=self.run.call_args.args[2];self.assertTrue(permit({}, {},True));self.assertFalse(permit({}, {},False))
         self.available.return_value=False
         with self.assertRaisesRegex(RuntimeError,'Interactive desktop unavailable'):self.run.call_args.kwargs['execution_guard']()
+        self.available.return_value=True;self.presence.return_value=True
+        with self.assertRaisesRegex(RuntimeError,'GUI now owns'):self.run.call_args.kwargs['execution_guard']()
+        self.assertFalse(permit({}, {},True))
         self.assertEqual(self.state(),'goal_completed')
     def test_no_credentials_still_permit_local_cached_goals_and_no_background_cloud_call(self):
         self.job();self.worker.step();cloud=self.run.call_args.args[1]
@@ -112,7 +115,7 @@ class ResidentTests(unittest.TestCase):
         finally:catalog.close()
         self.worker.step()
         self.study.assert_called_once()
-        self.assertEqual(self.state(),'studying_documentation')
+        self.assertEqual(self.state(),'learning_cycle_finished')
     def test_supervisor_completes_real_durable_cached_two_app_goal_without_provider_access(self):
         from app_agent.task_director import TaskDirector
         from test_catalog import app,snapshot
