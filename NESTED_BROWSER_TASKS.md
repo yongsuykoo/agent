@@ -20,6 +20,8 @@ Dropdowns with multiple selection, more than 80 options, or oversized option val
 
 The fixed observer walks ordinary DOM elements, open shadow roots and same-origin HTTP(S) iframe documents. Controls and result elements carry their root/frame path and document URL. A frame must remain connected to the original tab and own the observed document. Closed shadow roots, cross-origin or sandbox-isolated frames, and srcdoc/about:blank documents are unavailable in this route. No browser security boundary is disabled to expose them.
 
+Observation waits up to five seconds for supported visible embedded documents to finish loading before returning their controls. Inaccessible frames do not hold up planning. A frame that does not become ready stops observation with a timeout; the adapter does not assume its controls are absent.
+
 Before an action, the adapter checks live visibility, composed ancestor inert/disabled state, element identity/value, option metadata and the complete nested context. A replaced element, moved component, changed frame URL, detached frame, or changed option list stops dispatch. Typing and selecting use the element's own document's native setter and composed input/change events; they work inside the observed components without model-supplied code.
 
 Exact output verification works inside supported nested contexts. A hidden ancestor, input/select value, button label, body substring, truncated result or inaccessible frame cannot certify completion. Saved recipes bind to the DOM-tool revision as well as browser/session revisions and live controls. Repeats can use local replay with zero provider calls only while those guards remain valid. Action journaling and uncertain-submit recovery remain in effect.

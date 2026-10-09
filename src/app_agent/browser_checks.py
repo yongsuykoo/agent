@@ -294,8 +294,9 @@ def browser_smoke(directory,emit=print,cancel=None,*,fixture_no_sandbox=False):
         try:
             result=run_browser(TaskDirector(catalog,NestedPlanner(),lambda *args:True,emit,data,cancel),nested_goal,browser_request(nested_goal),factory)
             if result['outcome']!='steps_verified' or fixture.commits[before:]!=['Hello 世界 / express']:raise RuntimeError('Nested form was not independently verified: '+str(result.get('error',result.get('outcome'))))
-            proof=json.loads(Path(result['steps'][0]['proof']['path']).read_text())
-            output=next(c for c in proof['controls'] if c['automation_id']=='page:output' and c['name']=='Saved: Hello 世界 / express')
+            proof=json.loads(Path(result['steps'][0]['proof']['path']).read_text(encoding='utf-8'))
+            output=next((c for c in proof['controls'] if c['automation_id']=='page:output' and c['name']=='Saved: Hello 世界 / express'),None)
+            if output is None:raise RuntimeError('Saved UTF-8 nested evidence does not contain the exact verified output.')
             kinds=[p['kind'] for p in output['state']['context']['path']]
             if kinds!=['shadow','frame','shadow']:raise RuntimeError('Nested evidence does not identify its component/frame context.')
             return {'actual_submissions':1,'independently_verified_context':kinds,'actions':result['steps'][0]['record']['actions_executed']}
