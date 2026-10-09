@@ -32,7 +32,7 @@ def main():
     commands.add_parser("doctor", help="Check runtime prerequisites without revealing credentials")
     commands.add_parser("windows-smoke", help="Open Calculator and test three calculations; clears its current calculation")
     commands.add_parser('file-smoke',help='Automatically test disposable file/folder copies and ZIP verification; no desktop or API key needed')
-    browser=commands.add_parser('browser-smoke',help='Test nineteen real-browser workflows, sessions and nested controls using disposable local fixtures; no API key needed')
+    browser=commands.add_parser('browser-smoke',help='Test twenty-five real-browser workflows, sessions, nested and rich-text controls using disposable local fixtures; no API key needed')
     browser.add_argument('--trusted-fixture-no-sandbox',action='store_true',help='Linux built-in fixture testing only; forbidden on Windows and real browsing')
     commands.add_parser('browser-sessions',help='List agent-owned browser session names and site origins; never read cookies')
     login=commands.add_parser('browser-login',help='Open an agent-owned browser profile for one-time manual sign-in; no model or cookie export')

@@ -15,6 +15,7 @@ from .job_runtime import run_next
 from .runner import result_matches
 from .self_test import run_checks
 from .task_director import TaskDirector
+from .browser_semantic_checks import PAGE as SEMANTIC_PAGE, checks as semantic_checks
 
 PAGE='''<!doctype html><meta charset="utf-8"><title>Disposable browser check</title>
 <label>Message<input id="message"></label><label>Confirmed<input id="confirm" type="checkbox"></label>
@@ -68,6 +69,7 @@ class Fixture:
                     self.send_response(302);self.send_header('Location','http://127.0.0.1:1/private');self.end_headers();return
                 body='<h1>Navigation complete</h1>' if self.path=='/next' else PAGE
                 if self.path=='/nested':body=NESTED_PAGE
+                elif self.path=='/semantic':body=SEMANTIC_PAGE
                 elif self.path in ('/frame-form','/frame-changed'):
                     time.sleep(.15)  # Exercise real embedded-navigation readiness.
                     body=FRAME_PAGE
@@ -388,6 +390,7 @@ def browser_smoke(directory,emit=print,cancel=None,*,fixture_no_sandbox=False):
             ('Stale dropdown and embedded frame contexts reject actions',nested_stale),
             ('Nested queued workflows replay with zero provider calls',nested_replay),
             ('DOM traversal and retained node maps are bounded',traversal_limits)]
+    checks.extend(semantic_checks(root,fixture,factory,cancel,emit))
     emit('Private browser fixtures only; deterministic local planner, no provider calls or existing accounts.')
-    try:return run_checks(checks,root/'report.json',cancel,emit,scope='Nineteen real Chromium fixture checks including owned sessions, dropdowns, open shadow roots and same-origin embedded forms; deterministic planner, no external accounts or all-app certification. Linux fixture sandbox disabled: '+str(fixture_no_sandbox))
+    try:return run_checks(checks,root/'report.json',cancel,emit,scope='Twenty-five real Chromium fixture checks including owned sessions, dropdowns, open shadow roots, same-origin embedded forms, rich-text editors and semantic controls; deterministic planner, no external accounts or all-app certification. Linux fixture sandbox disabled: '+str(fixture_no_sandbox))
     finally:fixture.close()

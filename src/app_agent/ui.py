@@ -39,7 +39,7 @@ def launch(data_dir):
 
 def _launch(data_dir):
     root = tk.Tk()
-    root.title("Personal App Agent — 0.17.0")
+    root.title("Personal App Agent — 0.18.0")
     root.geometry("980x820")
     if not (os.getenv('AGENT_API_KEY') or os.getenv('OPENAI_API_KEY')):
         from .local_credentials import load_key
