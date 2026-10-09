@@ -16,7 +16,7 @@ class LifecycleTests(unittest.TestCase):
 
     def test_invalid_or_oversized_endpoint_cannot_connect_and_wait_is_bounded(self):
         for data in (b'0\n/devtools/browser/owned',b'65536\n/devtools/browser/owned',b'9222\n/not-owned',b'9222\n/devtools/browser/owned\nextra',b'x'*4097):
-            path=Mock();path.open.return_value=io.BytesIO(data);process=Mock();process.poll.return_value=None
+            path=Mock();path.open.side_effect=lambda *args:io.BytesIO(data);process=Mock();process.poll.return_value=None
             with self.subTest(data=data[:40]),self.assertRaises(TimeoutError):read_endpoint(path,process,lambda:None,timeout=0)
 
     def test_exited_browser_or_stop_does_not_wait_for_an_endpoint(self):
