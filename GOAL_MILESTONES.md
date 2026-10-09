@@ -1,6 +1,6 @@
 # Evidence for the personal-agent goal
 
-Version 0.22.0 adds resumable public PDF snapshots to catalog-backed background research, with exact-byte/current-generation fencing, owned-thread persistence, source refresh and durable front-matter reading. See ONLINE_MANUALS.md and VALIDATION_022.md. Universal mastery remains unfinished.
+Version 0.22.0 adds resumable public PDF snapshots to catalog-backed background research, with exact-byte/current-generation fencing, owned-thread persistence, source refresh and durable front-matter reading. All 576 regressions and sixteen document checks passed on each hosted Linux version. Both hosted Windows versions passed 574 regressions with two POSIX-only skips and all 45 document/browser/file checks. Fresh installed-wheel, signed-worker and real public HTTPS PDF/parser checks also passed. See ONLINE_MANUALS.md and VALIDATION_022.md. Universal mastery remains unfinished.
 
 Version 0.21.0 removes the prior-blueprint prerequisite for installed-PDF study. Current-generation draft evidence survives restart; only cited procedures establish a blueprint. Exhausted manuals without procedures queue alternative research. All 560 regressions and fourteen document checks pass on both hosted Linux versions. Both hosted Windows versions pass 558 regressions with two POSIX-only skips and all 43 document/browser/file checks. Fresh installed-wheel acceptance and signed-worker compatibility also pass. See MANUAL_BOOTSTRAP.md and VALIDATION_021.md. Universal mastery remains unfinished.
 

@@ -1,10 +1,10 @@
 {
   "release": {
-    "version": "0.21.0",
+    "version": "0.22.0",
     "minimum_host": "0.7.0",
     "protocol": 1,
-    "sha256": "ed619e521c8cf6d66d20cf3f6b4fe41f04a73e82c73c3cf6e690f893f29fbdcd",
-    "size": 620765
+    "sha256": "aabffe240b3dd0b206914415ac5103a3970c9c693111a772b2ed2090b18ac636",
+    "size": 627336
   },
-  "signature": "tf5IsW2P2dFF_NidB_90E6aPWW_hd-mGlrTG_KefMP-nVJGnF4xMgYImjhkx4n0dq3CbGpswC6CloZ-yx82vAg"
+  "signature": "61Q4i7K8gADcx_aamW5D4OgIevKT8Xg14tgoSgLvSE7_49xHjx2hCYStWGEQKCiX704pg-x75IF7VBm29h8qCQ"
 }
