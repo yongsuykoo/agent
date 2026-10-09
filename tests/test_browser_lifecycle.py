@@ -7,6 +7,20 @@ from app_agent.cli import prepare_output
 
 
 class LifecycleTests(unittest.TestCase):
+    def test_observation_waits_for_supported_embedded_document_before_returning_controls(self):
+        browser=Browser(check_url=lambda url:None);browser.identity=1;browser.process=Mock(pid=2)
+        ready={'url':'https://example.com','title':'Fixture','controls':[],'coverage':{'frames_loading':0}}
+        browser.evaluate=Mock(side_effect=[{**ready,'coverage':{'frames_loading':1}},ready])
+        with patch('app_agent.browser.time.sleep') as pause:
+            self.assertEqual(browser.observe()['coverage']['frames_loading'],0)
+        self.assertEqual(browser.evaluate.call_count,2);pause.assert_called_once_with(.05)
+
+    def test_embedded_loading_deadline_never_returns_an_incomplete_control_map(self):
+        browser=Browser(check_url=lambda url:None)
+        browser.evaluate=Mock(return_value={'coverage':{'frames_loading':1}})
+        with patch('app_agent.browser.time.monotonic',side_effect=[0,6]),self.assertRaises(TimeoutError):browser.observe()
+        self.assertEqual(browser.controls,{})
+
     def test_locked_and_partial_endpoint_are_retried_before_connecting(self):
         path=Mock();process=Mock();process.poll.return_value=None;guard=Mock()
         path.open.side_effect=[PermissionError('Browser still writing'),io.BytesIO(b'9222\n'),io.BytesIO(b'9222\n/devtools/browser/owned-token\n')]

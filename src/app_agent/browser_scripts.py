@@ -1,5 +1,5 @@
 """Reviewed bounded DOM tools; webpage/model strings remain data only."""
-DOM_TOOLS_VERSION='nested-dom-1'
+DOM_TOOLS_VERSION='nested-dom-2'
 
 OBSERVE=r'''(() => {
  const state=globalThis.__appAgent ||= {ids:new WeakMap(),nodes:new Map(),next:2};
@@ -52,7 +52,7 @@ OBSERVE=r'''(() => {
  state.describe=describe;
  const controls=[{id:0,name:'Browser page',type:'Window',automation_id:'',enabled:true,visible:true,actions:[],value:'',password:false,state:{}},
  {id:1,name:(document.body?.innerText||'').slice(0,16000),type:'Text',automation_id:'page:text',enabled:true,visible:true,actions:[],value:'',password:false,state:{}}];
- const coverage={elements:0,roots:0,frames_unavailable:0,limited:false};
+ const coverage={elements:0,roots:0,frames_unavailable:0,frames_loading:0,limited:false};
  const roots=[{root:document,depth:0}];let interactive=0,outputs=0;
  while(roots.length){
   const entry=roots.pop();if(coverage.roots>=64){coverage.limited=true;break;}coverage.roots++;
@@ -65,7 +65,10 @@ OBSERVE=r'''(() => {
     if(el.tagName==='IFRAME'){
      try{
       const doc=el.contentDocument;
-      if(doc && doc.URL.length<=4096 && new URL(doc.URL).origin===location.origin)roots.push({root:doc,depth:entry.depth+1});
+      if(doc && doc.URL.length<=4096 && ['http:','https:'].includes(new URL(doc.URL).protocol) && new URL(doc.URL).origin===location.origin){
+       if(doc.readyState!=='complete' && visible(el))coverage.frames_loading++;
+       roots.push({root:doc,depth:entry.depth+1});
+      }else if(!el.hasAttribute('srcdoc') && !(el.hasAttribute('sandbox') && !el.sandbox.contains('allow-same-origin')) && el.src && new URL(el.src).origin===location.origin && (!doc || doc.URL==='about:blank') && visible(el))coverage.frames_loading++;
       else coverage.frames_unavailable++;
      }catch(error){coverage.frames_unavailable++;}
     }

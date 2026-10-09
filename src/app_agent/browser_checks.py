@@ -68,7 +68,9 @@ class Fixture:
                     self.send_response(302);self.send_header('Location','http://127.0.0.1:1/private');self.end_headers();return
                 body='<h1>Navigation complete</h1>' if self.path=='/next' else PAGE
                 if self.path=='/nested':body=NESTED_PAGE
-                elif self.path in ('/frame-form','/frame-changed'):body=FRAME_PAGE
+                elif self.path in ('/frame-form','/frame-changed'):
+                    time.sleep(.15)  # Exercise real embedded-navigation readiness.
+                    body=FRAME_PAGE
                 elif self.path=='/foreign':body='<input aria-label="Foreign field"><output>Foreign proof</output>'
                 if self.path=='/account':
                     if self.signed_in():owner.auth_requests+=1;body=PAGE+'<p>Account: fixture member</p>'

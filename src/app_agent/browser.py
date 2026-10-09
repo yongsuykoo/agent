@@ -148,12 +148,14 @@ class Browser:
 
     def observe(self):
         if self.session:self.session.validate()
-        deadline=time.monotonic()+2
+        deadline=time.monotonic()+5
         while True:
             self.guard()
             try:
                 snapshot=self.evaluate(OBSERVE)
-                break
+                if not snapshot.get('coverage',{}).get('frames_loading'):break
+                if time.monotonic()>=deadline:raise TimeoutError('Embedded browser document did not become ready within the observation deadline.')
+                time.sleep(.05)
             except RuntimeError:
                 if time.monotonic()>=deadline:raise
                 time.sleep(.05)
