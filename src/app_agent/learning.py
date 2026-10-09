@@ -124,13 +124,22 @@ def merge_blueprints(previous, additional):
             original = capabilities[key]
             capabilities[key] = {**original, **cap, "name": original["name"],
                                  "source_urls": list(dict.fromkeys(original.get("source_urls", []) + cap.get("source_urls", [])))}
+            pages=original.get('source_pages',[])+cap.get('source_pages',[])
+            if pages:
+                capabilities[key]['source_pages']=list({json_key(page):page for page in pages}.values())
         else:
             capabilities[key] = dict(cap)
             added += 1
-    sources = {source["url"]: source for source in previous.get("sources", [])}
-    sources.update({source["url"]: source for source in additional.get("sources", [])})
+    def source_key(source):return (source['url'],source.get('sha256'),source.get('reader_revision'),json_key(source.get('read_cursor')))
+    sources = {source_key(source): source for source in previous.get("sources", [])}
+    sources.update({source_key(source): source for source in additional.get("sources", [])})
     return {**previous, **additional, "capabilities": list(capabilities.values()), "sources": list(sources.values()),
             "limitations": list(dict.fromkeys(previous.get("limitations", []) + additional.get("limitations", [])))}, added
+
+
+def json_key(value):
+    import json
+    return json.dumps(value,sort_keys=True,separators=(',',':'))
 
 
 def deepen_next(catalog, cloud, emit, limit=50, cancel=None):

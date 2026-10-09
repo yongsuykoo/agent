@@ -57,9 +57,15 @@ def study_campaign(catalog, cloud, emit, daily_limit=50, max_apps=5, max_plans=3
     if preview['status']=='cancelled' or cloud_blocked(preview.get('error','')):
         status='cancelled' if preview['status']=='cancelled' else 'cloud_blocked'
     else:
-        batch,status=study_batch(catalog,cloud,emit,daily_limit,max_apps-int(attempted),research_workers,cancel)
-        research.extend(batch)
-        if attempted and status=='queue_empty':status='progress'
+        from .manual_study import continue_manual
+        manual=continue_manual(catalog,cloud,emit,daily_limit,cancel) if max_apps-int(attempted)>0 else {'status':'no_pending_manual'}
+        continued=manual['status'] not in ('no_pending_manual','manual_busy')
+        if continued:research.append(manual)
+        if manual['status'] in ('cancelled','cloud_blocked','daily_limit'):status=manual['status']
+        else:
+            batch,status=study_batch(catalog,cloud,emit,daily_limit,max_apps-int(attempted)-int(continued),research_workers,cancel)
+            research.extend(batch)
+            if (attempted or continued) and status=='queue_empty':status='progress'
     if status == "queue_empty" and max_apps:
         result = deepen_next(catalog, cloud, emit, daily_limit, cancel)
         research.append(result)

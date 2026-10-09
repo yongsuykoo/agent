@@ -1,5 +1,6 @@
 """Provider-free acceptance of owned PDF manuals and the local study pipeline."""
 import hashlib
+import json
 from pathlib import Path
 import threading
 import uuid
@@ -76,11 +77,90 @@ def document_smoke(directory,emit=print,cancel=None):
         try:validate_extraction(operation(page=99),[doc])
         except ValueError:return {'unread_page_rejected':True,'page_hash_citation_verified':True}
         raise RuntimeError('Uninspected PDF page accepted as evidence.')
+    def seed(name,pages):
+        from .learning import ensure_blueprint
+        from .research import CloudResearcher
+        folder=root/name;folder.mkdir();(folder/'manual.pdf').write_bytes(manual_pdf(pages))
+        app={'id':'fixture:'+name,'name':'Owned '+name,'version':'1','source':'fixture','location':str(folder)}
+        catalog=Catalog(root/(name+'-agent-data'));catalog.sync({'apps':[app],'local_evidence':{app['id']:inspect_installation(app,deadline_seconds=3)}})
+        class FixtureCloud(CloudResearcher):
+            def __init__(self):super().__init__(key='fixture-key');self.calls=0;self.callback=None
+            def request(self,**payload):
+                self.calls+=1;data=json.loads(payload['input'])
+                if self.callback:self.callback()
+                return {'output':[{'content':[{'type':'output_text','text':json.dumps(operation(data['documents'][0]['pages'][0]['page']))}]}]}
+        cloud=FixtureCloud();ensure_blueprint(catalog,catalog.get(app['id']),cloud,lambda _:None)
+        return catalog,catalog.get(app['id']),cloud
+    def continuation():
+        from .manual_study import continue_manual
+        catalog,app,cloud=seed('restart-continuation',['Type Hello.']*70)
+        directory=catalog.data_dir;catalog.close();catalog=Catalog(directory)
+        try:
+            first=continue_manual(catalog,cloud,lambda _:None);last=continue_manual(catalog,cloud,lambda _:None)
+            blueprint=catalog.get(app['id'])['blueprint'];pages=[page['page'] for page in blueprint['capabilities'][0]['source_pages']]
+            calls=cloud.calls;repeated=continue_manual(catalog,cloud,lambda _:None)
+            if first['status']!='manual_progress' or last['status']!='manual_complete' or pages!=[1,33,65] or cloud.calls!=calls or repeated['status']!='no_pending_manual':
+                raise RuntimeError('Full manual continuation, provenance or restart recovery differs.')
+            return {'reading_complete':True,'reviewed_chunks':3,'citation_pages':pages,'restart_resumed':True,'repeated_provider_calls':0,'simulated_provider_responses':True}
+        finally:catalog.close()
+    def long_page():
+        expected='START '+('A'*50000)+' END';raw=manual_pdf([expected]);cursor=None;parts=[];ranges=[]
+        while True:
+            doc=extract_pdf(raw,cursor);parts.append(doc['text'].split('\n',1)[1]);ranges.append(doc['pages'][0]);cursor=doc['next_cursor']
+            if cursor is None:break
+        if ''.join(parts)!=expected or any(a['end_offset']!=b['offset'] for a,b in zip(ranges,ranges[1:])):
+            raise RuntimeError('Long-page continuation lost or repeated text.')
+        return {'characters_reconstructed':len(expected),'chunks':len(parts),'character_ranges_contiguous':True}
+    def empty_section():
+        from .manual_study import continue_manual
+        from .pdf_documents import progress_key
+        catalog,app,cloud=seed('empty-section',['Type Hello.']*32+['']*32+['Type Hello.'])
+        try:
+            before=cloud.calls;continue_manual(catalog,cloud,lambda _:None)
+            if cloud.calls!=before:raise RuntimeError('Empty section consumed provider calls.')
+            evidence=catalog.local_evidence(app['id'],app['generation']);state=catalog.setting(progress_key(app,evidence['manuals'][0]))
+            if state['no_text_pages']!=list(range(33,65)):raise RuntimeError('Unextractable page gap was lost.')
+            if continue_manual(catalog,cloud,lambda _:None)['status']!='manual_complete':raise RuntimeError('Reading failed to continue beyond empty pages.')
+            return {'empty_section_provider_calls':0,'unextractable_pages_recorded':32,'later_text_reviewed':True}
+        finally:catalog.close()
+    def fences():
+        from .manual_study import continue_manual,claim,release
+        from .pdf_documents import progress_key
+        from concurrent.futures import ThreadPoolExecutor
+        catalog,app,cloud=seed('checkpoint-fences',['Type Hello.']*40)
+        try:
+            manual=catalog.local_evidence(app['id'],1)['manuals'][0];key=progress_key(app,manual);before=catalog.get(app['id'])['blueprint']
+            stop=threading.Event();cloud.callback=stop.set
+            if continue_manual(catalog,cloud,lambda _:None,cancel=stop)['status']!='cancelled' or catalog.get(app['id'])['blueprint']!=before or catalog.setting(key)['cursor']!={'page':33,'offset':0}:
+                raise RuntimeError('Cancellation committed an unreviewed section.')
+            cloud.callback=None;directory=catalog.data_dir
+            def reserve(_):
+                connection=Catalog(directory)
+                try:return claim(connection,app,manual)
+                finally:connection.close()
+            with ThreadPoolExecutor(max_workers=4) as pool:tokens=list(pool.map(reserve,range(8)))
+            winners=[token for token in tokens if token]
+            if len(winners)!=1:raise RuntimeError('Multiple workers acquired one manual section.')
+            release(catalog,key,winners[0])
+            import app_agent,subprocess,sys
+            script="import sys,os;sys.path.insert(0,sys.argv[1]);from app_agent.catalog import Catalog;from app_agent.manual_study import claim;c=Catalog(sys.argv[2]);a=c.get('fixture:checkpoint-fences');m=c.local_evidence(a['id'],a['generation'])['manuals'][0];assert claim(c,a,m);os._exit(0)"
+            subprocess.run([sys.executable,'-I','-c',script,str(Path(app_agent.__file__).parent.parent),str(directory)],check=True,timeout=15)
+            recovered=claim(catalog,app,manual)
+            if recovered is None:raise RuntimeError('An exited worker blocked manual recovery until timeout.')
+            release(catalog,key,recovered)
+            def update():catalog.sync({'apps':[{**app,'version':'2'}]})
+            cloud.callback=update
+            if continue_manual(catalog,cloud,lambda _:None)['status']!='app_changed' or catalog.get(app['id'])['blueprint'] is not None:
+                raise RuntimeError('Version update accepted stale manual findings.')
+            return {'cancelled_checkpoint_unchanged':True,'concurrent_lease_winners':1,'dead_process_recovered':True,'updated_generation_rejected':True}
+        finally:catalog.close()
     checks=[('Compressed PDF pages and hashes',compressed),('Unicode PDF font mappings',unicode_text),
         ('Partial reading retains coverage gaps',coverage),('Malformed and scanned-only manuals do not establish evidence',lambda:(rejected(b'%PDF-1.4\nbroken'),rejected(manual_pdf([''])))),
         ('Encrypted manuals require no passwords and are rejected',lambda:rejected(manual_pdf(encrypted=True))),
         ('Compressed oversized page is rejected',lambda:rejected(manual_pdf(['A'*8_100_000]))),
-        ('Installed PDF study, caching and update adaptation',local_study),('Uninspected PDF pages cannot be cited',citations)]
+        ('Installed PDF study, caching and update adaptation',local_study),('Uninspected PDF pages cannot be cited',citations),
+        ('Full installed manual resumes after restart',continuation),('Long PDF page retains every character range',long_page),
+        ('Empty sections retain gaps and continue without model calls',empty_section),('Cancelled concurrent and updated manual checkpoints are fenced',fences)]
     emit('Document tests use owned PDF fixtures only; no provider key, network or desktop interaction.')
     return run_checks(checks,root/'report.json',cancel,emit,
         scope='Bounded owned PDF/manual learning checks. Documented operations remain execution-unverified; no all-app certification.')

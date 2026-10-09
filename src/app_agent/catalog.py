@@ -171,6 +171,8 @@ class Catalog:
         with self.db:
             cursor = self.db.execute("UPDATE apps SET blueprint=?,status='documented',error=NULL,attempts=0,retry_at=NULL WHERE id=? AND generation=? AND present=1", (json.dumps(blueprint), identity, generation))
             if cursor.rowcount:
+                from .pdf_documents import acknowledge_sources
+                acknowledge_sources(self,{'id':identity,'generation':generation},blueprint.get('sources',[]))
                 self.dirty_knowledge()
         return cursor.rowcount == 1
 

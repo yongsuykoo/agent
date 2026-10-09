@@ -222,12 +222,14 @@ def machine_report(catalog):
         coverage = catalog.coverage(app['id'], app['generation'])
         workflows = catalog.db.execute("SELECT COUNT(*) FROM workflows WHERE app_id=? AND generation=? AND outcome='result_observed'", (app['id'], app['generation'])).fetchone()[0]
         artifacts = catalog.db.execute('SELECT COUNT(*) FROM artifact_workflows WHERE app_id=? AND generation=?', (app['id'], app['generation'])).fetchone()[0]
+        from .manual_study import manual_report
         entries.append({'app_id': app['id'], 'name': app['name'], 'version': app.get('version', ''),
                         'generation': app['generation'], 'role': app.get('role', 'application'),
                         'launchable': bool(app.get('app_id') or app.get('launch_executable') or app.get('system_surface')),
                         'inspection': evidence.get('status') if evidence else 'system_metadata_observed' if app.get('role') == 'platform' else 'not_inspected',
                         'inspection_complete': evidence.get('complete', False) if evidence else False,
                         'local_manuals': len((evidence or {}).get('manuals', [])),
+                        'pdf_manual_progress':manual_report(catalog,app,evidence or {}),
                         'automation_interfaces': [r['progid'] for r in app.get('automation_registrations', [])],
                         'file_types': app.get('file_types', []), 'knowledge': app['status'],
                         'observed_capabilities': sum(c['observed_runs'] > 0 for c in coverage), 'verified_workflows': workflows,

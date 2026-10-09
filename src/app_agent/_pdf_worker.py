@@ -55,18 +55,26 @@ def main():
     overwrite_configuration(config)
     reader=PdfReader(io.BytesIO(raw),strict=True,root_object_recovery_limit=1024)
     if reader.is_encrypted:raise ManualError('Encrypted PDF manuals are not read; no password is requested.')
-    count=len(reader.pages);parts=[];pages=[];used=0;truncated=False
-    for index in range(min(count,32)):
+    first=int(sys.argv[2]);offset=int(sys.argv[3]);allow_empty=sys.argv[4]=='1'
+    count=len(reader.pages);parts=[];pages=[];used=0;truncated=False;next_cursor=None
+    if not 1<=first<=count or not 0<=offset<=8_000_000:raise ManualError('PDF reading cursor is outside the manual.')
+    for index in range(first-1,min(count,first-1+32)):
         text=(reader.pages[index].extract_text() or '').replace('\r\n','\n').replace('\r','\n').strip()
-        prefix=f'[PDF page {index+1}]\n';available=24000-used-len(prefix)-2
-        if available<=0:truncated=True;break
-        sample=text[:available];limited=len(sample)!=len(text);truncated|=limited
-        pages.append({'page':index+1,'sha256':hashlib.sha256(sample.encode()).hexdigest(),'characters':len(sample),'truncated':limited})
+        start=offset if index==first-1 else 0
+        if start>len(text):raise ManualError('PDF text cursor is outside the inspected page.')
+        prefix=f'[PDF page {index+1}]\n' if not start else f'[PDF page {index+1}, offset {start}]\n'
+        available=24000-used-len(prefix)-2
+        if available<=0:truncated=True;next_cursor={'page':index+1,'offset':start};break
+        sample=text[start:start+available];end=start+len(sample);limited=end<len(text);truncated|=limited
+        pages.append({'page':index+1,'offset':start,'end_offset':end,'sha256':hashlib.sha256(sample.encode()).hexdigest(),'characters':len(sample),'truncated':limited})
         if sample:parts.append(prefix+sample);used+=len(prefix)+len(sample)+2
+        next_cursor={'page':index+1,'offset':end} if limited else {'page':index+2,'offset':0} if index+1<count else None
         if limited:break
-    if not parts:raise ManualError('PDF has no readable text in the inspected pages; scanned manuals require OCR, which is unavailable.')
+    if not parts and not allow_empty:raise ManualError('PDF has no readable text in the inspected pages; scanned manuals require OCR, which is unavailable.')
     result={'format':'pdf','text':'\n\n'.join(parts),'pages':pages,'page_count':count,'pages_read':len(pages),
-        'truncated':truncated or len(pages)<count,'process_limits':{'memory_bytes':256*1024*1024,'cpu_seconds':6}}
+        'read_cursor':{'page':first,'offset':offset},'next_cursor':next_cursor,
+        'truncated':truncated or first!=1 or offset!=0 or next_cursor is not None,
+        'process_limits':{'memory_bytes':256*1024*1024,'cpu_seconds':6}}
     sys.stdout.write(json.dumps({'result':result},ensure_ascii=True))
 
 
