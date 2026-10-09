@@ -71,11 +71,28 @@ def opened_matches_path(before,opened,*,windows=None):
     return stat.S_ISREG(opened.st_mode) and all(getattr(before,key,None)==getattr(opened,key,None) for key in fields)
 
 
+def open_read(path):
+    if os.name!='nt':return os.open(path,os.O_RDONLY|getattr(os,'O_NOFOLLOW',0))
+    # Keep Windows writers/deleters out for this bounded read. NTFS timestamp
+    # updates alone cannot reliably identify an overlapping same-size write.
+    import ctypes
+    from ctypes import wintypes
+    import msvcrt
+    kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+    create=kernel.CreateFileW
+    create.argtypes=[wintypes.LPCWSTR,wintypes.DWORD,wintypes.DWORD,wintypes.LPVOID,wintypes.DWORD,wintypes.DWORD,wintypes.HANDLE]
+    create.restype=wintypes.HANDLE
+    close=kernel.CloseHandle;close.argtypes=[wintypes.HANDLE];close.restype=wintypes.BOOL
+    handle=create(str(path),0x80000000,1,None,3,0x00200000,None)
+    if handle==ctypes.c_void_p(-1).value:raise ctypes.WinError(ctypes.get_last_error())
+    try:return msvcrt.open_osfhandle(handle,os.O_RDONLY|os.O_BINARY)
+    except BaseException:close(handle);raise
+
+
 def read_chunks(path,guard):
     safe_path(path);before=path.stat()
     if not stat.S_ISREG(before.st_mode):raise ValueError('Only regular files can be read.')
-    flags=os.O_RDONLY|getattr(os,'O_BINARY',0)|getattr(os,'O_NOFOLLOW',0)
-    descriptor=os.open(path,flags)
+    descriptor=open_read(path)
     with os.fdopen(descriptor,'rb') as stream:
         opened=os.fstat(stream.fileno())
         if not opened_matches_path(before,opened):raise ValueError('File changed before it could be read.')
