@@ -189,7 +189,10 @@ class InterfaceFlowTests(unittest.TestCase):
                 maintenance();pump()
                 maintenance();pump()
                 self.close()
-        self.test_startup_discovery_auto_route_research_and_memory(root=RestartRoot(),queued_goal=True)
+        # A newly booted machine may have less than five minutes of uptime.
+        # Discovery must precede resuming a task even before the timer expires.
+        with patch.object(ui,'time',Mock(monotonic=Mock(return_value=1))):
+            self.test_startup_discovery_auto_route_research_and_memory(root=RestartRoot(),queued_goal=True)
 
     def test_selected_window_chat_uses_the_durable_runtime(self):
         class SelectedRoot(Root):

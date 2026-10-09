@@ -1034,7 +1034,7 @@ def _launch(data_dir):
         finally:recurring.close()
         changed = inventory_events.poll() or installation_monitor.poll()
         if not state["busy"] and not state["recording"]:
-            if changed or time.monotonic() - state["last_scan"] > 300:
+            if not state["last_scan"] or changed or time.monotonic() - state["last_scan"] > 300:
                 scan_inventory()
             elif resume_saved_job():
                 pass
