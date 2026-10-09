@@ -62,5 +62,14 @@ class UnattendedSessionTests(unittest.TestCase):
             jobs=Jobs(root);jobs.pause();jobs.close()
             with self.assertRaisesRegex(RuntimeError,'queue is paused'):start_session(root,launch=False)
 
+    def test_start_session_arms_read_only_study_automatically(self):
+        with tempfile.TemporaryDirectory() as root:
+            session=start_session(root,launch=False,login=False)
+            from app_agent.catalog import Catalog
+            catalog=Catalog(root)
+            try:self.assertTrue(catalog.setting('resident_study'))
+            finally:catalog.close()
+            self.assertEqual(session['state'],'active')
+
 
 if __name__=='__main__':unittest.main()

@@ -123,6 +123,12 @@ def start_session(directory,hours=10,*,launch=True,login=True):
     try:
         if jobs.paused():raise RuntimeError('The queue is paused. Resume safe jobs before starting a new unattended session.')
     finally:jobs.close()
+    # An unattended session is explicitly an autonomous learning session: arm
+    # read-only study automatically. The existing daily_limit remains intact.
+    from .catalog import Catalog
+    catalog=Catalog(directory)
+    try:catalog.set_setting('resident_study',True)
+    finally:catalog.close()
     # Configure login recovery first; a failed setup cannot arm a session.
     if launch and login:
         from .startup import set_startup
