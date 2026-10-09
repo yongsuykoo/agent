@@ -30,6 +30,8 @@ jobs:
         run: python -m pip install -e ".[windows,bridge]"
       - name: Run regression tests
         run: python -m unittest discover -s tests -v
+      - name: Run real isolated PDF and installed-manual checks
+        run: python -m app_agent.cli --data-dir "${{ runner.temp }}/app-agent-documents" document-smoke
       - name: Run real Windows file checks
         if: runner.os == 'Windows'
         run: python -m app_agent.cli --data-dir "${{ runner.temp }}/app-agent-files" file-smoke
@@ -44,5 +46,6 @@ jobs:
           path: |
             ${{ runner.temp }}/app-agent-files/**/report.json
             ${{ runner.temp }}/app-agent-browser/**/report.json
+            ${{ runner.temp }}/app-agent-documents/**/report.json
           if-no-files-found: warn
           retention-days: 14

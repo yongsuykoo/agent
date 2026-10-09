@@ -131,7 +131,7 @@ def inspect_installation(app, previous=None, deadline_seconds=1.0):
                     extension = path.suffix.lower()
                     kind = ('binary' if extension in ('.exe', '.dll') else
                             'manifest' if extension in ('.manifest', '.config') or path.name.casefold() in ('package.json', 'appxmanifest.xml', 'pyproject.toml') else
-                            'manual' if extension in ('.txt', '.md', '.html', '.htm') and DOC_NAME.search(path.stem) else None)
+                            'manual' if extension in ('.txt', '.md', '.html', '.htm', '.pdf') and DOC_NAME.search(path.stem) else None)
                     if kind and len(files) < FILE_LIMIT:
                         stat = child.stat(follow_symlinks=False)
                         files.append({'root': str(root), 'path': path.relative_to(root).as_posix(),
@@ -161,6 +161,14 @@ def inspect_installation(app, previous=None, deadline_seconds=1.0):
         path = Path(item['root']) / item['path']
         try:
             if item['kind'] == 'manual' and len(evidence['manuals']) < 3:
+                if path.suffix.lower()=='.pdf':
+                    from .pdf_documents import MAX_PDF_BYTES
+                    from .file_tools import open_read
+                    with os.fdopen(open_read(path),'rb') as stream:raw=stream.read(MAX_PDF_BYTES+1)
+                    if len(raw)>MAX_PDF_BYTES:raise ValueError('PDF manual exceeds its byte limit.')
+                    evidence['manuals'].append({'path':item['path'],'root':item['root'],'format':'pdf',
+                        'sha256':hashlib.sha256(raw).hexdigest(),'truncated':False,'status':'pending_extraction'})
+                    continue
                 with path.open('rb') as stream:
                     raw = stream.read(DOC_BYTES + 1)
                 encoding = 'utf-16' if raw[:2] in (b'\xff\xfe', b'\xfe\xff') else 'utf-8-sig'

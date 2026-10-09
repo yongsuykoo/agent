@@ -200,9 +200,16 @@ def research_context(catalog, app):
         context['service_types'] = sorted({str(s.get('start_type', '')) for s in model.get('services', [])})
     # No installation paths, settings contents or arbitrary binary strings go to
     # the provider. Installed manuals are explicit untrusted source evidence.
-    documents = [{'url': 'installation-manual:' + m['sha256'] + '/' + m['path'], 'text': m['text'],
-                  'sha256': m['sha256'], 'retrieved_at': evidence.get('observed_at', ''), 'truncated': m['truncated']}
-                 for m in evidence.get('manuals', [])]
+    documents=[]
+    for manual in evidence.get('manuals',[]):
+        if manual.get('format')=='pdf':
+            from .pdf_documents import installed_pdf
+            try:documents.append(installed_pdf(catalog,app,evidence,manual))
+            except (OSError,ValueError,RuntimeError) as error:
+                context['installation'].setdefault('manual_gaps',[]).append(str(error)[:300])
+        else:
+            documents.append({'url':'installation-manual:'+manual['sha256']+'/'+manual['path'],'text':manual['text'],
+                'sha256':manual['sha256'],'retrieved_at':evidence.get('observed_at',''),'truncated':manual['truncated']})
     return context, documents
 
 

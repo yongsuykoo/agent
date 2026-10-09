@@ -32,6 +32,7 @@ def main():
     commands.add_parser("doctor", help="Check runtime prerequisites without revealing credentials")
     commands.add_parser("windows-smoke", help="Open Calculator and test three calculations; clears its current calculation")
     commands.add_parser('file-smoke',help='Automatically test disposable file/folder copies and ZIP verification; no desktop or API key needed')
+    commands.add_parser('document-smoke',help='Test owned PDF reading, page evidence, installed-manual caching and update adaptation; no API key needed')
     browser=commands.add_parser('browser-smoke',help='Test twenty-five real-browser workflows, sessions, nested and rich-text controls using disposable local fixtures; no API key needed')
     browser.add_argument('--trusted-fixture-no-sandbox',action='store_true',help='Linux built-in fixture testing only; forbidden on Windows and real browsing')
     commands.add_parser('browser-sessions',help='List agent-owned browser session names and site origins; never read cookies')
@@ -88,6 +89,12 @@ def main():
     research.add_argument("--source", action="append", help="Optional documentation HTTPS URL; repeat up to five times")
     args = parser.parse_args()
     try:
+        if args.command=='document-smoke':
+            from .document_checks import document_smoke
+            result=document_smoke(args.data_dir)
+            print(json.dumps(result,indent=2))
+            if result['status']!='passed':parser.exit(1,'Document checks failed or were cancelled. Read the saved report.\n')
+            return
         if args.command in ('browser-sessions','browser-login','forget-browser-session'):
             from .browser_sessions import BrowserSessions,login_session
             if args.command=='browser-login':result=login_session(args.data_dir,args.name,args.url)
