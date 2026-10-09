@@ -240,6 +240,9 @@ class Jobs:
             elif 'interactive desktop unavailable' in errors.casefold():
                 status,detail='retry_wait','Waiting for an unlocked interactive desktop; no unverified action replay.'
                 due=stamp+30
+            elif 'browser session is already in use' in errors.casefold():
+                status,detail='retry_wait','Waiting for the owned browser session to close; no unverified action replay.'
+                due=stamp+30
             elif re.search(r'HTTP (?:401|403)\b|needs AGENT_API_KEY|API key', errors, re.I):
                 status = 'waiting_credentials'
             elif item['attempts'] < 5 and re.search(r'HTTP (?:408|429|5\d\d)\b|timed?\s*out|timeout|connection|network|temporar|offline', errors, re.I):

@@ -88,6 +88,37 @@ class ImmediateWorker:
 
 
 class InterfaceFlowTests(unittest.TestCase):
+    def test_browser_session_manager_runs_manual_login_without_provider_or_task(self):
+        from app_agent.browser_sessions import BrowserSessions
+        class Tree(Widget):
+            def __init__(self,*args,**kwargs):super().__init__(*args,**kwargs);self.items={}
+            def heading(self,*args,**kwargs):pass
+            def get_children(self):return list(self.items)
+            def insert(self,*args,iid,values):self.items[iid]=values
+            def delete(self,item):del self.items[item]
+            def selection(self):return list(self.items)[:1]
+        class SessionRoot(Root):
+            def mainloop(self):
+                pump=next(fn for delay,fn in self.callbacks if delay==100)
+                self.buttons['Background & schedules']();self.buttons['Browser sessions']()
+                self.buttons['Load selected session']()  # Missing selection is a handled error.
+                self.buttons['Open sign-in browser']();pump()
+                self.buttons['Refresh sessions']();self.buttons['Load selected session']()
+                self.buttons['Forget selected session']();self.close()
+        root=SessionRoot()
+        def button(*args,**kwargs):root.buttons[kwargs['text']]=kwargs['command'];return Widget(*args,**kwargs)
+        with tempfile.TemporaryDirectory() as directory:
+            def login(data,name,url,emit,cancel):
+                self.assertFalse(cancel.is_set());BrowserSessions(data,check_url=lambda url:None).create(name,url);emit('Session retained; authentication not assumed.')
+            desktop=Mock();desktop.windows.return_value=[]
+            with patch.dict('os.environ',{'AGENT_API_KEY':'','OPENAI_API_KEY':''}),patch.object(ui.tk,'Tk',return_value=root),patch.object(ui.tk,'Toplevel',return_value=Root()),patch.object(ui.tk,'StringVar',Variable),patch.object(ui.tk,'BooleanVar',Variable),patch.object(ui.tk,'IntVar',Variable),patch.object(ui.tk,'Text',Widget),patch.multiple(ui.ttk,Frame=Widget,Label=Widget,Entry=Widget,Combobox=Widget,Button=button,Checkbutton=Widget,Spinbox=Widget,Treeview=Tree),patch.object(ui,'AutomationWorker',ImmediateWorker),patch.object(ui,'WindowsDesktop',desktop),patch.object(ui,'register_stop',return_value=threading.Event()),patch.object(ui.simpledialog,'askstring',return_value=''),patch.object(ui,'CloudResearcher',side_effect=AssertionError('No provider access')) as cloud,patch('app_agent.browser_sessions.login_session',side_effect=login) as manual,patch('app_agent.startup.startup_enabled',return_value=False),patch.object(ui.messagebox,'askokcancel',return_value=True),patch.object(ui.messagebox,'showerror') as error:
+                ui.launch(Path(directory))
+            cloud.assert_not_called();manual.assert_called_once();error.assert_called_once()
+            self.assertIn('Select one',error.call_args.args[1]);self.assertEqual(BrowserSessions(directory).list(),[])
+            jobs=Jobs(directory)
+            try:self.assertEqual(jobs.list(),[])
+            finally:jobs.close()
+
     def test_chat_runs_real_local_file_task_without_provider_or_sharing_prompt(self):
         class FilesRoot(Root):
             def mainloop(self):

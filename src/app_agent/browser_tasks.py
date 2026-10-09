@@ -9,7 +9,7 @@ from .native_tasks import _save
 from .runner import result_matches
 
 
-def run_browser(director,task,request,browser_factory=None):
+def run_browser(director,task,request,browser_factory=None,session_store=None):
     browser_factory=browser_factory or Browser
     checkpoint=director.checkpoint;browser=None
     result={'task':task,'outcome':'blocked','steps':[],'verified_results':[],
@@ -39,22 +39,28 @@ def run_browser(director,task,request,browser_factory=None):
                 result.update(outcome='steps_verified',steps=[record],verified_results=saved['verified'],
                               scope='Previously observed browser result retained without reopening the page or repeating actions; current external service state is not revalidated.')
                 return _save(director,result)
-        observation={'window':'New isolated browser session','controls':[{'id':0,'name':request['url'],'type':'URL'}]}
+        session=None
+        if request.get('session'):
+            from .browser_sessions import BrowserSessions
+            session=(session_store or BrowserSessions(director.directory)).get(request['session'],request['url'])
+        observation={'window':'Owned browser session' if session else 'New isolated browser session','controls':[{'id':0,'name':request['url'],'type':'URL'}]}
         if not director.approve({'kind':'open_browser','target':0,'text':request['url'],
-                'reason':'Open a fresh profile, operate only this requested browser task, and verify exact rendered output.'},observation):
+                'reason':('Reuse agent-owned session '+request['session'] if session else 'Open a fresh profile')+'; operate only this requested browser task and verify exact rendered output.'},observation):
             result['outcome']='cancelled' if director.cancel.is_set() else 'blocked'
             return _save(director,result)
         guard()
         if checkpoint:checkpoint.save_plan(plan)
-        browser=browser_factory(guard);browser.start(request['url'])
+        browser=browser_factory(guard,session=session) if session else browser_factory(guard)
+        browser.start(request['url'])
         desktop=checkpoint.desktop(browser) if checkpoint else browser
         # The exact full user goal and installed browser revision identify a recipe.
         version={key:browser.info.get(key) for key in ('product','revision','protocolVersion')}
+        if session:version['session']={key:session.metadata[key] for key in ('id','revision','origin')}
         key='browser-workflow:'+hashlib.sha256(task.encode()).hexdigest()
         cached=director.catalog.setting(key,{})
         previous=[cached['record']] if cached.get('version')==version and cached.get('record',{}).get('recipe') else []
         blueprint={'name':'Isolated browser DOM','capabilities':['Read rendered controls','Replace text-field value','Click a control','Set checkbox state'],
-                   'limitations':['Use only advertised control actions. No passwords, file uploads, downloads, arbitrary JavaScript, existing browser sessions or account cookies.',
+                   'limitations':['Use only advertised control actions. No password entry, file uploads, downloads, arbitrary JavaScript, imported personal browser profiles or cookie export. A named session uses only its previously configured agent-owned profile and site origin.',
                                   'Completion requires exact case-sensitive rendered output, not a text-input value or a button label. Only one tab and the top-level DOM are observed.']}
         record=director.runner(desktop,director.cloud,director.approve,director.emit,director.directory,director.cancel).run(
             task,blueprint,max_steps=16,previous_workflows=previous,required_result_text=request['expected_result'],result_control_id='page:output')

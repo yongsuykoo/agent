@@ -39,7 +39,7 @@ def launch(data_dir):
 
 def _launch(data_dir):
     root = tk.Tk()
-    root.title("Personal App Agent — 0.15.0")
+    root.title("Personal App Agent — 0.16.0")
     root.geometry("980x820")
     if not (os.getenv('AGENT_API_KEY') or os.getenv('OPENAI_API_KEY')):
         from .local_credentials import load_key
@@ -405,7 +405,8 @@ def _launch(data_dir):
         from .file_tools import file_request
         from .browser import browser_request
         local_files=mode=='run' and handle is None and file_request(task) is not None
-        browser_goal=mode=='run' and handle is None and browser_request(task) is not None
+        try:browser_goal=mode=='run' and handle is None and browser_request(task) is not None
+        except ValueError as error:append(str(error));return
         if mode in ("run", "diagnose", "practice") and not local_files and not autonomous_tasks.get() and not messagebox.askokcancel("Cloud data sharing", "The task, installed app names used to choose an app, and selected-window control text will be sent to OpenAI. Automatic mode may open the chosen installed app. Avoid sensitive windows. Continue?"):
             return
         use_vision = not local_files and not browser_goal and vision.get() and mode in ("run", "practice")
@@ -707,6 +708,51 @@ def _launch(data_dir):
     ttk.Button(toolbar, text="Open Calculator", command=lambda: subprocess.Popen(["calc.exe"])).pack(side="left", padx=5)
     ttk.Button(toolbar, text="Self-test", command=start_self_test).pack(side="left", padx=5)
     ttk.Button(toolbar, text="Learn all apps", command=start_campaign).pack(side="left", padx=5)
+    def show_browser_sessions():
+        from .browser_sessions import BrowserSessions,login_session,session_name,origin
+        dialog=tk.Toplevel(root);dialog.title('Browser sessions');dialog.geometry('740x420')
+        ttk.Label(dialog,text='Sign in once in an agent-owned browser profile. Close all sign-in windows when finished. Passwords and cookies stay in the browser; stored profiles do not guarantee current authentication.',wraplength=710).pack(anchor='w',padx=10,pady=8)
+        tree=ttk.Treeview(dialog,columns=('name','origin'),show='headings',height=6)
+        tree.heading('name',text='Session name');tree.heading('origin',text='Site');tree.pack(fill='both',expand=True,padx=10)
+        name=tk.StringVar(value='work');url=tk.StringVar(value='https://example.com')
+        fields=ttk.Frame(dialog);fields.pack(fill='x',padx=10,pady=8)
+        ttk.Label(fields,text='Session name').pack(anchor='w');ttk.Entry(fields,textvariable=name).pack(fill='x')
+        ttk.Label(fields,text='Sign-in / app URL').pack(anchor='w');ttk.Entry(fields,textvariable=url).pack(fill='x')
+        def refresh_sessions():
+            try:
+                for item in tree.get_children():tree.delete(item)
+                for session in BrowserSessions(data_dir).list():tree.insert('', 'end',iid=session['name'],values=(session['name'],session['origin']))
+            except Exception as error:messagebox.showerror('Browser sessions',str(error),parent=dialog)
+        def selected():
+            choices=tree.selection()
+            if len(choices)!=1:raise ValueError('Select one stored browser session.')
+            session=BrowserSessions(data_dir).get(choices[0]);name.set(session.metadata['name']);url.set(session.metadata['origin'])
+            return session.metadata['name']
+        def sign_in():
+            if state['busy'] or state['recording'] or busy_elsewhere():
+                append('Finish the current task before opening a sign-in browser.');return
+            try:
+                alias=session_name(name.get());target=url.get().strip();origin(target)
+            except ValueError as error:messagebox.showerror('Browser sessions',str(error),parent=dialog);return
+            state['busy']=True;cancel.clear();task_permission.clear()
+            status.set('Sign in directly in the owned browser, then close its windows. STOP closes this sign-in session.')
+            def work():login_session(data_dir,alias,target,lambda text:events.put(('log',text)),cancel)
+            automation.submit(work)
+        def forget():
+            try:
+                alias=selected()
+                if not messagebox.askokcancel('Forget browser session','Delete this agent-owned browser profile and its retained sign-in data? Other browser profiles are unaffected.',parent=dialog):return
+                BrowserSessions(data_dir).remove(alias);refresh_sessions()
+            except Exception as error:messagebox.showerror('Browser sessions',str(error),parent=dialog)
+        def load_selected():
+            try:selected()
+            except Exception as error:messagebox.showerror('Browser sessions',str(error),parent=dialog)
+        buttons=ttk.Frame(dialog);buttons.pack(fill='x',padx=10,pady=8)
+        ttk.Button(buttons,text='Open sign-in browser',command=sign_in).pack(side='left')
+        ttk.Button(buttons,text='Load selected session',command=load_selected).pack(side='left',padx=5)
+        ttk.Button(buttons,text='Forget selected session',command=forget).pack(side='left',padx=5)
+        ttk.Button(buttons,text='Refresh sessions',command=refresh_sessions).pack(side='left',padx=5)
+        refresh_sessions()
     def show_jobs():
         dialog = tk.Toplevel(root)
         dialog.title('Saved goals and recovery')
@@ -795,6 +841,7 @@ def _launch(data_dir):
         ttk.Button(row,text='Save settings',command=apply_settings).pack(side='left')
         ttk.Button(row,text='Start worker now',command=start_background).pack(side='left',padx=5)
         ttk.Button(row,text='Pause all goals',command=stop).pack(side='left',padx=5)
+        ttk.Button(row,text='Browser sessions',command=show_browser_sessions).pack(side='left',padx=5)
         ttk.Label(dialog,text='Schedule the current chat task. Each occurrence keeps its original task and permissions; overlapping or uncertain occurrences do not repeat.',wraplength=860).pack(anchor='w',padx=10,pady=6)
         minutes=tk.IntVar(value=60);repeat=tk.BooleanVar(value=False)
         row=ttk.Frame(dialog);row.pack(fill='x',padx=10)

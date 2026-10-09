@@ -11,3 +11,4 @@ jobs.sqlite3*
 worker-status.json
 worker.lock
 ui.lock
+browser-sessions/

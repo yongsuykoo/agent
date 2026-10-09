@@ -17,11 +17,16 @@ from .research import public_https
 
 def browser_request(task):
     quote=r'"([^"\r\n]+)"'
-    match=re.fullmatch(r'(?:open\s+'+quote+r'\s+in\s+(?:a\s+)?browser\s+and|use\s+(?:the\s+)?browser\s+at\s+'+quote+r'\s+to)\s+(.+?)\s+and\s+verify\s+exactly:\s*'+quote+r'\s*[.]?',task.strip(),re.I|re.S)
+    named=re.fullmatch(r'use\s+browser\s+session\s+'+quote+r'\s+at\s+'+quote+r'\s+to\s+(.+?)\s+and\s+verify\s+exactly:\s*'+quote+r'\s*[.]?',task.strip(),re.I|re.S)
+    match=named or re.fullmatch(r'(?:open\s+'+quote+r'\s+in\s+(?:a\s+)?browser\s+and|use\s+(?:the\s+)?browser\s+at\s+'+quote+r'\s+to)\s+(.+?)\s+and\s+verify\s+exactly:\s*'+quote+r'\s*[.]?',task.strip(),re.I|re.S)
     if not match:return None
-    first,second,instruction,expected=match.groups();url=first or second
+    first,second,instruction,expected=match.groups();url=second if named else first or second
     if len(url)>4096 or not instruction.strip() or len(instruction)>4000 or not expected.strip() or len(expected)>2000:return None
-    return {'url':url,'task':instruction.strip(),'expected_result':expected}
+    request={'url':url,'task':instruction.strip(),'expected_result':expected}
+    if named:
+        from .browser_sessions import session_name
+        request['session']=session_name(first)
+    return request
 
 
 def executable():
@@ -39,14 +44,16 @@ def executable():
 
 
 class Browser:
-    def __init__(self,guard=lambda:None,*,headless=False,check_url=public_https,fixture_no_sandbox=False):
+    def __init__(self,guard=lambda:None,*,headless=False,check_url=public_https,fixture_no_sandbox=False,session=None,manual_login=False):
         if fixture_no_sandbox and (sys.platform=='win32' or check_url is public_https):
             raise ValueError('Disabling the browser sandbox is permitted only for trusted Linux test fixtures.')
         self.guard=guard;self.check_url=check_url;self.headless=headless;self.fixture_no_sandbox=fixture_no_sandbox
         self.transport=None;self.process=None;self.profile=None;self.target=None;self.controls={};self.blocked=0
+        self.session,self.manual_login=session,manual_login
 
     def start(self,url):
         self.check_url(url);self.guard()
+        if self.session:self.session.check_url(url)
         binary=executable()
         proxy=os.getenv('HTTPS_PROXY') or os.getenv('https_proxy')
         if proxy:
@@ -54,7 +61,8 @@ class Browser:
             if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password:raise ValueError('Browser proxy configuration is unsupported.')
         self.profile=tempfile.TemporaryDirectory(prefix='app-agent-browser-')
         root=Path(self.profile.name);self.log=(root/'browser.log').open('wb')
-        args=[binary,'--user-data-dir='+str(root/'profile'),'--remote-debugging-port=0','--remote-debugging-address=127.0.0.1','--no-first-run','--no-default-browser-check','--disable-background-networking','--window-size=1280,720','about:blank']
+        profile=self.session.profile if self.session else root/'profile'
+        args=[binary,'--user-data-dir='+str(profile),'--remote-debugging-port=0','--remote-debugging-address=127.0.0.1','--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-background-mode','--window-size=1280,720','about:blank']
         if self.headless:args.insert(1,'--headless=new')
         if self.fixture_no_sandbox:args.insert(1,'--no-sandbox')
         if proxy:
@@ -63,8 +71,13 @@ class Browser:
         env=os.environ.copy()
         if sys.platform!='win32':env['XDG_CONFIG_HOME']=str(root);env['XDG_CACHE_HOME']=str(root)
         try:
+            if self.session:
+                self.session.acquire()
+                # A retained profile may have a port file from an earlier process.
+                from .file_tools import safe_path
+                safe_path(profile/'DevToolsActivePort').unlink(missing_ok=True)
             self.process=subprocess.Popen(args,stdout=self.log,stderr=self.log,env=env)
-            deadline=time.monotonic()+15;active=root/'profile/DevToolsActivePort'
+            deadline=time.monotonic()+15;active=profile/'DevToolsActivePort'
             while not active.exists():
                 self.guard()
                 if self.process.poll() is not None:raise RuntimeError('Managed browser exited before startup; inspect the installed browser and sandbox configuration.')
@@ -99,7 +112,7 @@ class Browser:
                 self.transport.send('Fetch.failRequest',{'requestId':params['requestId'],'errorReason':'BlockedByClient'},event.get('sessionId'))
         elif event['method']=='Target.targetCreated':
             target=event['params']['targetInfo']
-            if target['type']=='page' and target['targetId']!=self.target:self.transport.send('Target.closeTarget',{'targetId':target['targetId']})
+            if not self.manual_login and target['type']=='page' and target['targetId']!=self.target:self.transport.send('Target.closeTarget',{'targetId':target['targetId']})
 
     def evaluate(self,expression):
         frame=self.transport.call('Page.getFrameTree')['frameTree']['frame']['id']
@@ -120,6 +133,7 @@ class Browser:
             time.sleep(.05)
 
     def observe(self):
+        if self.session:self.session.validate()
         deadline=time.monotonic()+2
         while True:
             self.guard()
@@ -130,17 +144,20 @@ class Browser:
                 if time.monotonic()>=deadline:raise
                 time.sleep(.05)
         self.check_url(snapshot['url'])
+        if self.session:self.session.check_url(snapshot['url'])
         self.url=snapshot['url']
         self.controls={c['id']:c for c in snapshot['controls']}
         return {'window':'Managed browser page','window_handle':self.identity,'process_id':self.process.pid,
                 'url':snapshot['url'],'page_title':snapshot['title'],'controls':snapshot['controls']}
 
     def act(self,action):
+        if self.session:self.session.validate();self.session.check_url(self.url)
         self.guard();control=self.controls.get(action.get('target'))
         if not control or control['password'] or action['kind'] not in control['actions']:raise ValueError('Browser action does not identify an available control.')
         if action['kind']=='type' and (not isinstance(action.get('text'),str) or len(action['text'])>2000):raise ValueError('Browser text entry is invalid.')
         if action['kind']=='toggle' and action.get('state') not in ('on','off'):raise ValueError('Browser checkbox needs an explicit state.')
         if control.get('href'):self.check_url(control['href'])
+        if self.session and control.get('href'):self.session.check_url(control['href'])
         result=self.evaluate(ACT+'('+json.dumps({'control':control,'action':action,'url':self.url})+')')
         if result is not True:raise RuntimeError('Browser action did not confirm dispatch.')
 
@@ -158,5 +175,6 @@ class Browser:
                 try:self.process.wait(timeout=3)
                 except subprocess.TimeoutExpired:self.process.kill();self.process.wait(timeout=3)
         if hasattr(self,'log'):self.log.close()
+        if self.session and (not self.process or self.process.poll() is not None):self.session.close()
         if self.profile:
             self.profile.cleanup();self.profile=None

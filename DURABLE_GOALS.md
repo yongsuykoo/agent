@@ -1,5 +1,7 @@
 # Persistent Windows goals
 
+Version 0.16.0 adds [named browser sessions](BROWSER_SESSIONS.md). Busy owned profiles defer safe tasks automatically; unverified effects still require recovery review. Recipes bind to browser version, profile identity, site origin and manual sign-in revision. Historical verified recovery works after a profile is forgotten without reopening the site.
+
 Version 0.15.0 includes [isolated browser goals](BROWSER_TASKS.md). Each browser action is journaled before dispatch. Interrupted unverified actions retain `needs_review`; a verified restart checks the saved observation's integrity and keeps the historical result without reopening the site. Historical evidence does not certify the website's current state. Exact repeats submitted as new goals can reuse a verified recipe only after checking the installed browser revision and live URL/control/content guards.
 
 Chat and transcribed voice tasks now enter a local persistent queue. The agent saves the original goal, task permissions, selected window/process when supplied, app-version plan, verified outputs, action journal and recovery state. Closing and reopening the standalone agent retains this work.
