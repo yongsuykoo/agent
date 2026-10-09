@@ -52,6 +52,14 @@ def main():
     commands.add_parser('jobs', help='Show saved goals, progress and recovery states locally')
     resident=commands.add_parser('worker',help='Run authorized saved goals and schedules in this Windows session without the GUI')
     resident.add_argument('--once',action='store_true',help='Run one supervisor cycle then exit')
+    resident.add_argument('--session-id',help='Bounded unattended session identifier')
+    unattended=commands.add_parser('start-unattended',help='Run the local worker and background study for a bounded session of up to ten hours')
+    unattended.add_argument('--hours',type=float,default=10)
+    unattended.add_argument('--no-login-startup',action='store_true',help='Do not enable restart at this Windows account login')
+    commands.add_parser('unattended-status',help='Show the current bounded unattended session status')
+    commands.add_parser('stop-unattended',help='Stop the current unattended session and pause queued work')
+    watch=commands.add_parser('watch-unattended',help='Internal: supervise and restart the bounded worker')
+    watch.add_argument('--session-id',required=True)
     commands.add_parser('worker-status',help='Show local background worker state without revealing tasks or credentials')
     commands.add_parser('enable-startup',help='Start the local background worker when this Windows account logs in')
     commands.add_parser('disable-startup',help='Remove this agent current-account login startup')
@@ -115,7 +123,29 @@ def main():
             return
         if args.command=='worker':
             from .resident import run_resident
-            run_resident(args.data_dir,once=args.once);return
+            cancellation=None
+            if getattr(args,'session_id',None):
+                from .unattended import Sessions,SessionCancellation
+                store=Sessions(args.data_dir)
+                try:session=store.current()
+                finally:store.close()
+                if not session or session['id']!=args.session_id:raise RuntimeError('Unattended session is no longer active.')
+                cancellation=SessionCancellation(args.data_dir,session)
+            run_resident(args.data_dir,once=args.once,cancel=cancellation);return
+        if args.command=='start-unattended':
+            from .unattended import start_session
+            result=start_session(args.data_dir,args.hours,login=not args.no_login_startup)
+        elif args.command=='unattended-status':
+            from .unattended import Sessions
+            store=Sessions(args.data_dir)
+            try:result=store.current() or {'state':'not_started'}
+            finally:store.close()
+        elif args.command=='stop-unattended':
+            from .unattended import stop_session
+            stop_session(args.data_dir);result={'stopped':True}
+        elif args.command=='watch-unattended':
+            from .unattended import watch_session
+            watch_session(args.data_dir,args.session_id);return
         if args.command=='worker-status':
             path=args.data_dir/'worker-status.json'
             result=json.loads(path.read_text()) if path.exists() else {'state':'not_started'}

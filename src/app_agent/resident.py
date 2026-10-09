@@ -82,7 +82,23 @@ class Supervisor:
         finally:schedules.close()
         if paused:self.status('queue_paused');return None
         if self.presence(self.directory):self.status('gui_open');return None
-        if not self.available():self.status('waiting_desktop');return None
+        # Documentation reading is read-only and can continue while Windows is
+        # locked. Desktop actions and installation inspection still wait for the
+        # interactive desktop below.
+        if not self.available():
+            catalog=Catalog(self.directory)
+            try:
+                enabled=catalog.setting('resident_study',False)
+                key=self.key_reader(self.directory) if enabled else None
+                now=self.clock()
+                if key and self.study and now>=self.next_study:
+                    self.next_study=now+60;self.status('studying_documentation')
+                    return self.study(catalog,DeferredCloud(lambda:CloudResearcher(key=key)),self.emit,
+                                      cancel=self.cancel,limit=catalog.setting('daily_limit',0))
+            except Exception as error:
+                self.status('study_deferred',error_type=type(error).__name__)
+            finally:catalog.close()
+            self.status('waiting_desktop');return None
         if self.idle()<5:self.status('waiting_idle');return None
         now=self.clock()
         if now>=self.next_scan or self.changed and self.changed.poll():
@@ -130,13 +146,13 @@ class Supervisor:
         return None
 
 
-def run_resident(directory,emit=print,once=False):
+def run_resident(directory,emit=print,once=False,cancel=None):
     if sys.platform!='win32':raise RuntimeError('The background worker requires a logged-in interactive Windows session.')
     from .automation_worker import initialize_com
     from .hotkey import register_stop
     cleanup=None;hotkey=None;changed=None
     with SessionLock(directory):
-        supervisor=Supervisor(directory,emit,study=background_study)
+        supervisor=Supervisor(directory,emit,cancel=cancel,study=background_study)
         try:
             cleanup=initialize_com();changed=InstallationEvents(directory,emit);supervisor.changed=changed
             for value in (signal.SIGINT,signal.SIGTERM):signal.signal(value,lambda signum,frame:supervisor.stop())

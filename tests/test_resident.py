@@ -105,6 +105,14 @@ class ResidentTests(unittest.TestCase):
             with patch('app_agent.campaign.study_campaign') as campaign:background_study(catalog,Mock(),lambda _:None,cancel=threading.Event(),limit=0)
             self.assertEqual(campaign.call_args.kwargs['research_workers'],4);self.assertEqual(campaign.call_args.kwargs['daily_limit'],0)
         finally:catalog.close()
+    def test_read_only_study_can_progress_while_desktop_is_locked(self):
+        self.available.return_value=False;self.key.return_value='fixture-key'
+        catalog=Catalog(self.temp.name)
+        try:catalog.set_setting('resident_study',True)
+        finally:catalog.close()
+        self.worker.step()
+        self.study.assert_called_once()
+        self.assertEqual(self.state(),'studying_documentation')
     def test_supervisor_completes_real_durable_cached_two_app_goal_without_provider_access(self):
         from app_agent.task_director import TaskDirector
         from test_catalog import app,snapshot

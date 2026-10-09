@@ -5,7 +5,7 @@ if not exist ".venv\Scripts\python.exe" (
   pause
   exit /b 1
 )
-echo Runs saved autonomous goals locally. Ctrl+Alt+F12 pauses the queue.
-echo Keep Windows logged in and unlocked. The worker waits while the GUI is open.
-".venv\Scripts\python.exe" -m app_agent.cli worker
+echo Starts a bounded unattended session (up to 10 hours) and restarts the worker if it exits.
+echo Documentation study can continue while Windows is locked; desktop actions wait for unlock.
+".venv\Scripts\python.exe" -m app_agent.cli start-unattended --hours 10
 if errorlevel 1 pause
