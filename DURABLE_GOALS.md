@@ -24,6 +24,7 @@ The agent must be running on an interactive Windows desktop to execute GUI work.
 | App/OS update after a partial verified goal | Retain evidence and stop the stale plan. Do not repeat completed steps to rebuild it. |
 | Crash/failure after dispatch but before step verification | Mark `needs_review`. Neither queue resume nor restart blindly dispatches that action again. |
 | Restart after verified Photoshop exports | Read and verify the saved files again, without another render. Missing/changed files cannot be reported as completed. |
+| Restart after verified native file copy or ZIP creation | Recheck every copied file or archive member against the saved source manifest and output hash; do not copy/create again. |
 | Selected window/process replaced | Stop instead of attaching to another document. |
 
 `needs_review` remains visible for inspection and cancellation; it has no force-replay button. After checking the actual app state, a user may cancel that goal and submit a new, explicit task. This conservative rule prevents this runtime's automatic retries from duplicating an uncertain send/print/click; it is not an exactly-once guarantee from external applications. Application-specific draft/message/print identifiers are still needed for more automatic recovery of external effects.

@@ -33,7 +33,7 @@ def launch_connection(data_dir, controller_key, named_hostname=None):
     controller_fingerprint = fingerprint(public)
     executable = tunnel_executable()
     root = tk.Tk()
-    root.title("App Agent connection — 0.13.0")
+    root.title("App Agent connection — 0.14.0")
     root.geometry("920x820")
     frame = ttk.Frame(root, padding=16)
     frame.pack(fill="both", expand=True)
@@ -236,7 +236,7 @@ def launch_connection(data_dir, controller_key, named_hostname=None):
 
     def copy_diagnostics():
         server, tunnel = state["server"], state["tunnel"]
-        report = diagnostics.report("0.13.0", controller_fingerprint,
+        report = diagnostics.report("0.14.0", controller_fingerprint,
                                     server.server_port if server else None,
                                     state["local_ok"] and not state["disconnecting"],
                                     tunnel is not None and tunnel.poll() is None)

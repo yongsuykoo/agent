@@ -88,6 +88,29 @@ class ImmediateWorker:
 
 
 class InterfaceFlowTests(unittest.TestCase):
+    def test_chat_runs_real_local_file_task_without_provider_or_sharing_prompt(self):
+        class FilesRoot(Root):
+            def mainloop(self):
+                self.command.delete('1.0','end');self.command.insert('1.0',self.task)
+                self.buttons['Run task']()
+                next(fn for delay,fn in self.callbacks if delay==100)()
+                self.close()
+        root=FilesRoot()
+        def text(*args,**kwargs):
+            widget=Widget(*args,**kwargs)
+            if kwargs.get('height')==4:root.command=widget
+            return widget
+        def button(*args,**kwargs):root.buttons[kwargs['text']]=kwargs['command'];return Widget(*args,**kwargs)
+        with tempfile.TemporaryDirectory() as directory:
+            source=Path(directory)/'source.txt';source.write_bytes(b'Actual chat file content');output=Path(directory)/'output.txt'
+            data=Path(directory)/'agent-data';root.task=f'Copy file "{source}" to "{output}" and verify.'
+            desktop=Mock();desktop.windows.return_value=[]
+            with patch.dict('os.environ',{'AGENT_API_KEY':'','OPENAI_API_KEY':''}),patch.object(ui.tk,'Tk',return_value=root),patch.object(ui.tk,'StringVar',Variable),patch.object(ui.tk,'BooleanVar',Variable),patch.object(ui.tk,'IntVar',Variable),patch.object(ui.tk,'Text',side_effect=text),patch.multiple(ui.ttk,Frame=Widget,Label=Widget,Entry=Widget,Combobox=Widget,Button=button,Checkbutton=Widget,Spinbox=Widget),patch.object(ui,'AutomationWorker',ImmediateWorker),patch.object(ui,'WindowsDesktop',desktop),patch.object(ui,'register_stop',return_value=threading.Event()),patch.object(ui.simpledialog,'askstring',return_value=''),patch.object(ui,'CloudResearcher',side_effect=AssertionError('No provider access')) as cloud,patch.object(ui.messagebox,'askokcancel') as sharing,patch.object(ui,'scan_machine',side_effect=AssertionError('No inventory needed')):
+                ui.launch(data);cloud.assert_not_called();sharing.assert_not_called()
+            self.assertEqual(output.read_bytes(),source.read_bytes());jobs=Jobs(data)
+            try:self.assertEqual(jobs.list()[0]['status'],'completed');self.assertFalse(jobs.list()[0]['options']['use_vision'])
+            finally:jobs.close()
+
     def test_background_settings_and_schedule_controls_persist_without_extra_actions(self):
         class Tree(Widget):
             instances=[]

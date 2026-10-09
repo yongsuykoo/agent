@@ -21,6 +21,7 @@ def main():
     connection.add_argument("--controller-key", required=True, type=Path, help="Pinned controller PUBLIC key file")
     commands.add_parser("doctor", help="Check runtime prerequisites without revealing credentials")
     commands.add_parser("windows-smoke", help="Open Calculator and test three calculations; clears its current calculation")
+    commands.add_parser('file-smoke',help='Automatically test disposable file/folder copies and ZIP verification; no desktop or API key needed')
     automatic = commands.add_parser("self-test", help="Automatically test Windows inventory, Calculator and disposable Notepad; save a report")
     automatic.add_argument("--with-cloud", action="store_true", help="Also run AI tasks; prompts securely for a missing API key")
     automatic.add_argument("--with-office", action="store_true", help="Also create and verify fresh Excel/Word test files when installed; no cloud calls")
@@ -70,6 +71,12 @@ def main():
     research.add_argument("--source", action="append", help="Optional documentation HTTPS URL; repeat up to five times")
     args = parser.parse_args()
     try:
+        if args.command=='file-smoke':
+            from .file_checks import file_smoke
+            result=file_smoke(args.data_dir)
+            print(json.dumps(result,indent=2))
+            if result['status']!='passed':parser.exit(1,'File checks failed or were cancelled. Read the saved report.\n')
+            return
         if args.command=='worker':
             from .resident import run_resident
             run_resident(args.data_dir,once=args.once);return

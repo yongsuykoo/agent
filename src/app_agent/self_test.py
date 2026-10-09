@@ -29,7 +29,7 @@ class SkipCheck(RuntimeError):
     pass
 
 
-def run_checks(checks, report_path, cancel, emit):
+def run_checks(checks, report_path, cancel, emit, *, scope=None):
     """Persist after each check; one failure does not hide independent results."""
     report_path = Path(report_path)
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -39,7 +39,7 @@ def run_checks(checks, report_path, cancel, emit):
         package_version = "unknown"
     report = {"started_at": datetime.now(timezone.utc).isoformat(), "checks": [],
               "agent_version": package_version,
-              "report_path": str(report_path), "scope": "Named automatic checks only; optional Office checks use fresh test files; not universal app certification"}
+              "report_path": str(report_path), "scope": scope or "Named automatic checks only; optional Office checks use fresh test files; not universal app certification"}
     for name, check in checks:
         if cancel.is_set():
             item = {"name": name, "status": "cancelled"}
