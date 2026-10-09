@@ -125,7 +125,8 @@ class TransportTests(unittest.TestCase):
         self.peer.sendall(bytes([129,128]))
         with self.assertRaises(ValueError):self.client._message(__import__('time').monotonic()+1)
     def test_timeout_and_stop_interrupt_waits(self):
-        with self.assertRaises(TimeoutError):self.client.call('Runtime.enable',timeout=.01)
+        with self.assertRaisesRegex(TimeoutError,r'Browser command timed out: Runtime\.enable.*do not retry an action automatically'):
+            self.client.call('Runtime.enable',timeout=.01)
         self.client.guard=Mock(side_effect=RuntimeError('Stopped'))
         with self.assertRaisesRegex(RuntimeError,'Stopped'):self.client.call('Runtime.enable')
     def test_remote_devtools_endpoints_are_rejected_before_socket(self):

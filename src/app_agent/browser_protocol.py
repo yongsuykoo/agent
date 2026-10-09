@@ -79,7 +79,9 @@ class DevTools:
     def call(self,method,params=None,*,browser=False,timeout=20):
         self.guard();identity=self.send(method,params,None if browser else self.session);deadline=time.monotonic()+timeout
         while True:
-            message=self._message(deadline)
+            try:message=self._message(deadline)
+            except TimeoutError as error:
+                raise TimeoutError('Browser command timed out: '+method+'. Dispatch outcome may be unknown; do not retry an action automatically.') from error
             if message.get('id')==identity:
                 if 'error' in message:raise RuntimeError('Browser command failed: '+str(message['error'].get('message','unknown'))[:200])
                 return message.get('result',{})
